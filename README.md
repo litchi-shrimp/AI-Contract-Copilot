@@ -8,9 +8,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg">
   <img src="https://img.shields.io/badge/FastAPI-0.100+-green.svg">
-  <img src="https://img.shields.io/badge/DeepSeek-v3.2_|_v4_Flash-purple.svg">
+  <img src="https://img.shields.io/badge/DeepSeek-v4_Pro_|_v4_Flash-purple.svg">
   <img src="https://img.shields.io/badge/Agent-8_Multi_Agent-orange.svg">
-  <img src="https://img.shields.io/badge/Templates-213_Contracts_41_Categories-10b981.svg">
   <img src="https://img.shields.io/badge/SSE-Real_Time_Streaming-ef4444.svg">
   <img src="https://img.shields.io/badge/License-MIT-lightgrey.svg">
 </p>
