@@ -56,7 +56,7 @@
 | 亮点 | 业务价值 | 技术实现 |
 |------|----------|----------|
 | **Prompt / Context Engineering** | LLM 输出结构化、决策可解释、上下文精简高效，Agent 交互质量持续迭代优化 | • Schema Output 约束 JSON 格式；<br>• CoT + FewShot 引导推理链；<br>• 决策时携带 confidence + evidence 显式思考；<br>• Skill 渐进披露按需加载工具描述；<br>• Loop Engineering 迭代优化 Prompt（自制 Eval 指标驱动）； |
-| **Multi-Agent 协作 × Workflow 编排** | Agent 既保持自主决策能力，又被 Workflow 流程化约束，分工明确、协作高效 | • 8 Agent：ReAct（交互式 Agent）+ Plan-Execute（LeaderAgent）+ Critic-Preview（审查-修订）混合编排；<br>• 每个 Agent 携带不同 Skill 与 Tool Use 边界；<br>• 对抗式 Agent（生成者/审查者双模型）充分释放 LLM 能力； |
+| **Multi-Agent 协作 × Workflow 编排** | Agent 既保持自主决策能力，又被 Workflow 流程化约束，分工明确、协作高效 | • 8 Agent：ReAct（交互式 Agent）+ Plan-Execute（LeaderAgent）+ Critic-Preview（审查-修订）混合编排；<br>• 每个 Agent 携带不同 Skill 与 Tool Use 边界；<br>• 对抗式 Agent（生成者/审查者双模型）充分发挥 LLM 能力； |
 | **多类 Memory 与动态上下文管理** | 上下文始终控制在 4K tokens 以内，Agent 间记忆传递高效不丢失关键信息 | • 多类记忆分角色管理（原文 / Search / Agent / User / Observation / Tool）；<br>• 动态滚动策略自动清理过期记忆段；<br>• Agent 协作间通过文件 + 内存双通道传递结构化数据； |
 | **结构化合同 × 定位增量修改** | Agent 按 locator 精准定位修改目标，Diff 增量而非全文重写，效率高且精确可控 | • 合同按大纲层级结构化存储；<br>• locator 定位体系（1 → 1.1 → 1.1.1）支持精确节点寻址；<br>• Agent 自主选择 update / insert / delete 在指定位置执行增量修改； |
 | **Harness Engineering 工业级稳定** | 不同 Agent 工具权限精确隔离，长链路不崩溃，异常自动恢复不丢数据 | • 每个 Agent 独立 Skill × Tool 白名单，Prompt + 规则双重约束 Tool Use 边界（如 Drafter 禁止 delete、Leader 禁止 delete）；<br>• LLM 重试 + 模型降级 + 多级兜底（LLM → BM25）；<br>• 超时熔断 + Session 过期 + 失败节点快照回滚； |
