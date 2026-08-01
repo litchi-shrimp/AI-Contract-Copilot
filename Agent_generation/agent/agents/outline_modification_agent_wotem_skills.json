@@ -1,0 +1,10 @@
+[
+    {
+        "name": "search-reference-web",
+        "description": "参考资料搜索技能，用于检索网络参考信息"
+    },
+    {
+        "name": "outline-editor",
+        "description": "大纲编辑技能，用于修改和管理合同大纲"
+    }
+]

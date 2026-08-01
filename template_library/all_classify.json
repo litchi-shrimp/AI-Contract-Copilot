@@ -1,0 +1,264 @@
+{
+    "买卖合同": {
+        "ID": "Sell"
+    },
+    "供用电、水、气、热力合同": {
+        "ID": "Power"
+    },
+    "赠与合同": {
+        "ID": "Gift"
+    },
+    "借款合同": {
+        "ID": "Borrow"
+    },
+    "租赁合同": {
+        "ID": "Lease"
+    },
+    "融资租赁合同": {
+        "ID": "Finance"
+    },
+    "承揽合同": {
+        "ID": "Accept"
+    },
+    "建设工程合同": {
+        "勘察合同": {
+            "ID": "Construction_Survey"
+        },
+        "设计合同": {
+            "ID": "Construction_Design"
+        },
+        "施工合同": {
+            "ID": "Construction_Construction"
+        }
+    },
+    "运输合同": {
+        "客运合同": {
+            "ID": "Transport_Knowledge"
+        },
+        "货运合同": {
+            "ID": "Transport_Cargo"
+        },
+        "包价旅游合同": {
+            "ID": "Transport_Tour"
+        },
+        "多式联运合同": {
+            "ID": "Transport_Multi"
+        }
+    },
+    "技术合同": {
+        "技术开发": {
+            "ID": "Tech_Development"
+        },
+        "技术转让": {
+            "ID": "Tech_Transfer"
+        },
+        "技术许可": {
+            "ID": "Tech_License"
+        },
+        "技术咨询": {
+            "ID": "Tech_Consult"
+        },
+        "技术服务": {
+            "ID": "Tech_Service"
+        },
+        "职务技术成果、非职务成果相关约定": {
+            "ID": "Tech_Meeting"
+        }
+    },
+    "保管合同": {
+        "ID": "Guard"
+    },
+    "委托合同": {
+        "ID": "Delegate"
+    },
+    "物业服务合同": {
+        "ID": "Property"
+    },
+    "行纪合同": {
+        "ID": "History"
+    },
+    "中介合同": {
+        "ID": "Mediate"
+    },
+    "合伙合同": {
+        "ID": "Partner"
+    },
+    "保证合同": {
+        "ID": "Guarantee"
+    },
+    "抵押合同": {
+        "ID": "Mortgage"
+    },
+    "质押合同": {
+        "ID": "Pledge"
+    },
+    "金融类合同": {
+        "银行结算账户协议": {
+            "ID": "Bank_Account"
+        },
+        "信用证合同": {
+            "ID": "Bank_Credit"
+        },
+        "银行托管合同": {
+            "ID": "Bank_Manage"
+        },
+        "票据委托收款合同": {
+            "ID": "Bank_Ticket_Receive"
+        },
+        "保险合同（财险、人身、再保险）": {
+            "ID": "Bank_Insurance"
+        },
+        "担保函、保函合同": {
+            "ID": "Bank_Guarantee"
+        },
+        "保理合同（《合同解释（三）》明确）": {
+            "ID": "Bank_Mediate"
+        }
+    },
+    "知识产权与技术类合同": {
+        "软件许可协议（含SaaS订阅合同）": {
+            "ID": "Knowledge_Software_License"
+        },
+        "计算机信息系统集成合同": {
+            "ID": "Knowledge_System_Integration"
+        },
+        "网络服务合同（含平台服务协议、用户协议）": {
+            "ID": "Knowledge_Network"
+        },
+        "互联网数据使用授权协议": {
+            "ID": "Knowledge_Internet"
+        },
+        "商标使用许可合同": {
+            "ID": "Knowledge_Trademark"
+        },
+        "著作权许可与转让合同": {
+            "ID": "Knowledge_Copyright"
+        },
+        "集成电路布图设计许可合同": {
+            "ID": "Knowledge_IC_Design"
+        }
+    },
+    "工程建设领域": {
+        "EPC合同（工程总承包）": {
+            "ID": "Engineering_EPC"
+        },
+        "PPP项目合同": {
+            "ID": "Engineering_PPP_Project"
+        },
+        "监理合同": {
+            "ID": "Engineering_Supervision"
+        },
+        "招标代理合同": {
+            "ID": "Engineering_Tender"
+        },
+        "造价咨询合同": {
+            "ID": "Engineering_Consult"
+        },
+        "工程分包合同（合法分包、劳务分包）": {
+            "ID": "Engineering_Subcontract"
+        }
+    },
+    "劳动与人事合同": {
+        "劳动合同": {
+            "ID": "Labor_Labor"
+        },
+        "劳务合同（民事）": {
+            "ID": "Labor_Service"
+        },
+        "雇佣合同": {
+            "ID": "Labor_Employ"
+        },
+        "实习协议": {
+            "ID": "Labor_Intern"
+        },
+        "竞业限制协议": {
+            "ID": "Labor_Competitive"
+        },
+        "保密协议（NDA）": {
+            "ID": "Labor_Confidential"
+        }
+    },
+    "投资与股权类合同": {
+        "股权转让合同": {
+            "ID": "Invest_Transfer"
+        },
+        "投资协议": {
+            "ID": "Invest_Agreement"
+        },
+        "股东协议": {
+            "ID": "Invest_Shareholder"
+        },
+        "合资经营合同": {
+            "ID": "Invest_Joint"
+        },
+        "可转债/可转股投资协议": {
+            "ID": "Invest_Convert"
+        },
+        "并购重组协议": {
+            "ID": "Invest_Acquire"
+        },
+        "投资基金募集及托管合同": {
+            "ID": "Invest_Fund"
+        }
+    },
+    "房地产与物业管理类": {
+        "房屋买卖合同": {
+            "ID": "Real_Estate_Sell"
+        },
+        "房屋租赁合同（含长租公寓合同）": {
+            "ID": "Real_Estate_Lease"
+        },
+        "商铺租赁合同": {
+            "ID": "Real_Estate_Lease"
+        },
+        "不动产登记代理合同": {
+            "ID": "Real_Estate_Register"
+        },
+        "居间代理房产买卖合同": {
+            "ID": "Real_Estate_Proxy_Sell"
+        },
+        "物业委托管理服务合同": {
+            "ID": "Real_Estate_Manage"
+        }
+    },
+    "贸易与供应链类": {
+        "委托加工合同": {
+            "ID": "Trade_Process"
+        },
+        "进出口代理合同": {
+            "ID": "Trade_Export"
+        },
+        "供应链服务合同": {
+            "ID": "Trade_Supplychain"
+        },
+        "物流服务合同": {
+            "ID": "Trade_Logistics"
+        },
+        "仓单质押合同": {
+            "ID": "Trade_Pledge"
+        },
+        "冷链运输服务合同": {
+            "ID": "Trade_Transport"
+        }
+    },
+    "数字经济与平台经济合同": {
+        "算力服务合同（实务常见）": {
+            "ID": "Digital_Compute"
+        },
+        "云服务合同（IaaS, PaaS, SaaS）": {
+            "ID": "Digital_Cloud"
+        },
+        "数据交易合同": {
+            "ID": "Digital_Data"
+        },
+        "算法服务合同": {
+            "ID": "Digital_Algorithm"
+        },
+        "数字内容授权协议": {
+            "ID": "Digital_Content"
+        },
+        "电子商务平台协议": {
+            "ID": "Digital_Platform"
+        }
+    }
+}

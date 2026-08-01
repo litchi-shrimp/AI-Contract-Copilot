@@ -1,0 +1,97 @@
+[
+  {
+    "file": "insert_clause.py",
+    "name": "insert_clause",
+    "description": "插入新条款内容，支持批量插入。批量操作时会自动排序，无需考虑 locator 偏移问题。用于补充遗漏的章节/条款/子条款。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "locators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "参考节点定位标识列表，如[\"3\", \"3.2\", \"5.1\"]"
+        },
+        "contents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "插入的条款大致说明内容列表，与 locators 一一对应"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["before", "after", "child"]
+          },
+          "description": "插入位置列表：before/after 同级插入，child 作为子节点插入"
+        }
+      },
+      "required": ["locators", "contents", "positions"]
+    },
+    "return": {
+      "type": "string",
+      "description": "操作结果"
+    }
+  },
+  {
+    "file": "update_clause.py",
+    "name": "update_clause",
+    "description": "更新指定节点的大致说明内容，支持多个locator批量操作。仅用于修正已有条款的概括描述，不用于新增条款。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "locator": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "节点定位标识列表，如[\"1.1\", \"2.3\"]"
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "更新后的条款大致说明内容列表，与 locator 一一对应"
+        }
+      },
+      "required": ["locator", "content"]
+    },
+    "return": {
+      "type": "string",
+      "description": "操作结果"
+    }
+  },
+  {
+    "file": "update_header_footer.py",
+    "name": "update_header_footer",
+    "description": "整体替换合同首部或尾部内容。合同首部和尾部是整体文本段落，通过 target 参数区分操作目标。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["header", "footer"],
+          "description": "操作目标：'header'=合同首部，'footer'=合同尾部"
+        },
+        "content": {
+          "type": "string",
+          "description": "替换后的完整内容"
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["update", "get"],
+          "description": "操作类型：'update' 更新内容，'get' 获取当前内容"
+        }
+      },
+      "required": ["target", "operation"]
+    },
+    "return": {
+      "type": "string",
+      "description": "操作结果"
+    }
+  }
+]

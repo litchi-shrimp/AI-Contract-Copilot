@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>合同智能生成 · SSE 测试台</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-primary: #0b0e14;
+            --bg-secondary: #11171f;
+            --bg-card: #17202b;
+            --bg-input: #0f141c;
+            --border: #1e2d3d;
+            --border-active: #c9a84c;
+            --text-primary: #e4e8ee;
+            --text-secondary: #8899aa;
+            --text-muted: #5a6a7a;
+            --accent-gold: #c9a84c;
+            --accent-gold-dim: #8a7a3a;
+            --accent-blue: #4a8fd4;
+            --accent-green: #3ab47a;
+            --accent-red: #d45a4a;
+            --accent-purple: #9a6ac9;
+            --accent-cyan: #3ab4c9;
+            --accent-orange: #d48a3a;
+            --radius: 6px;
+            --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', consolas, monospace;
+            --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Header ===== */
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 28px;
+            height: 28px;
+            border: 1.5px solid var(--accent-gold);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            color: var(--accent-gold);
+            font-weight: 700;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-badge {
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .status-badge .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            display: inline-block;
+            transition: background 0.3s;
+        }
+
+        .status-badge .dot.connected {
+            background: var(--accent-green);
+        }
+
+        .status-badge .dot.running {
+            background: var(--accent-gold);
+            animation: pulse 1s infinite;
+        }
+
+        .status-badge .dot.error {
+            background: var(--accent-red);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+
+        /* ===== Main Layout ===== */
+        .main-panels {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ===== Left Panel: Session Info ===== */
+        .panel-left {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+
+        .panel-left .section {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-left .section-title {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        /* ===== Resize Handle ===== */
+        .resize-handle {
+            width: 4px;
+            cursor: col-resize;
+            background: var(--border);
+            flex-shrink: 0;
+            transition: background 0.15s;
+            position: relative;
+            z-index: 10;
+        }
+
+        .resize-handle:hover {
+            background: var(--accent-gold-dim);
+        }
+
+        .resize-handle.active {
+            background: var(--accent-gold);
+        }
+
+        /* ===== Center Panel: Stream Output ===== */
+        .panel-center {
+            width: 320px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .panel-center .stream-header {
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .panel-center .stream-header .title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-secondary);
+        }
+
+        /* ===== Collapsible Reasoning Chain ===== */
+        .tc-block {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .tc-block.tc-reason {
+            border-left: 2px solid var(--accent-purple);
+        }
+
+        .tc-block.tc-reason.tc-act {
+            border-left-color: var(--accent-orange);
+        }
+
+        .tc-block.tc-answer {
+            border-left: 2px solid var(--accent-cyan);
+            background: rgba(23, 32, 43, 0.6);
+        }
+
+        .tc-block.tc-user {
+            border-left: 2px solid var(--accent-green);
+            background: rgba(58, 180, 122, 0.06);
+        }
+
+        .tc-header {
+            padding: 5px 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+
+        .tc-header:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tc-reason {
+            cursor: pointer;
+        }
+
+        .tc-reason .tc-header {
+            cursor: pointer;
+        }
+
+        .tc-answer .tc-header,
+        .tc-user .tc-header {
+            cursor: default;
+        }
+
+        .tc-label {
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .tc-duration {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            margin-left: 6px;
+        }
+
+        .tc-reason .tc-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .tc-answer .tc-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+        }
+
+        .tc-user .tc-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--accent-green);
+        }
+
+        .tc-arrow {
+            font-size: 8px;
+            color: var(--text-muted);
+            margin-left: auto;
+            transition: transform 0.15s;
+            flex-shrink: 0;
+        }
+
+        .tc-reason.collapsed .tc-arrow {
+            transform: rotate(0deg);
+        }
+
+        .tc-reason:not(.collapsed) .tc-arrow {
+            transform: rotate(90deg);
+        }
+
+        /* ===== Chat Layout ===== */
+        .tc-block.tc-agent {
+            align-self: flex-start;
+            margin-right: 20px;
+            max-width: calc(100% - 20px);
+        }
+
+        .tc-block.tc-user {
+            align-self: flex-end;
+            margin-left: 20px;
+            max-width: calc(100% - 20px);
+        }
+
+        .stream-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .tc-body {
+            padding: 6px 12px 10px;
+            font-size: 12px;
+            line-height: 1.7;
+            word-break: break-word;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .tc-reason.collapsed .tc-body {
+            display: none;
+        }
+
+        .tc-reason:not(.collapsed) .tc-body {
+            display: block;
+            border-top: 1px solid var(--border);
+        }
+
+        .tc-answer .tc-body {
+            display: block;
+        }
+
+        .tc-user .tc-body {
+            display: block;
+            font-size: 11px;
+            color: var(--text-secondary);
+            border-top: 1px solid rgba(58, 180, 122, 0.15);
+        }
+
+        .tc-reason .tc-body {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .stream-placeholder {
+            flex: 1;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* ===== Outline Drawer ===== */
+        .outline-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s, color 0.1s;
+            flex-shrink: 0;
+        }
+
+        .outline-toggle:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .outline-toggle .arrow {
+            font-size: 8px;
+            margin-left: auto;
+            transition: transform 0.15s;
+        }
+
+        .outline-toggle.open .arrow {
+            transform: rotate(90deg);
+        }
+
+        .outline-toggle .badge {
+            font-size: 9px;
+            background: var(--accent-gold-dim);
+            color: #0b0e14;
+            padding: 0 5px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .outline-drawer {
+            display: none;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 10px 14px;
+            font-size: 12px;
+            line-height: 1.6;
+            flex-shrink: 0;
+        }
+
+        .outline-drawer.open {
+            display: block;
+        }
+
+        /* Outline tree */
+        .outline-tree {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .outline-tree ul {
+            list-style: none;
+            padding-left: 18px;
+            margin: 2px 0;
+        }
+
+        .outline-tree li {
+            position: relative;
+            padding: 2px 0;
+            color: var(--text-secondary);
+        }
+
+        .outline-tree li .node-key {
+            color: var(--accent-cyan);
+            font-weight: 500;
+        }
+
+        .outline-tree li .node-val {
+            color: var(--text-primary);
+        }
+
+        .outline-tree li .node-str {
+            color: var(--accent-green);
+        }
+
+        .outline-tree li .node-toggle {
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 9px;
+            margin-right: 4px;
+            user-select: none;
+        }
+
+        .outline-tree li .node-toggle:hover {
+            color: var(--text-primary);
+        }
+
+        .outline-tree li.collapsed>ul {
+            display: none;
+        }
+
+        .outline-placeholder {
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 20px 0;
+            text-align: center;
+        }
+
+        /* ===== Right Panel: Event Log ===== */
+        .panel-right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 300px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 4px 0;
+            color: var(--text-secondary);
+        }
+
+        .info-row .val {
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .info-row .val.idle {
+            color: var(--text-muted);
+        }
+
+        .info-row .val.running {
+            color: var(--accent-gold);
+        }
+
+        .info-row .val.waiting_input {
+            color: var(--accent-cyan);
+        }
+
+        .info-row .val.completed {
+            color: var(--accent-green);
+        }
+
+        .info-row .val.error {
+            color: var(--accent-red);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            border-color: var(--accent-gold-dim);
+            background: #1e2d3d;
+        }
+
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: var(--accent-gold);
+            border-color: var(--accent-gold);
+            color: #0b0e14;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #dbb856;
+            border-color: #dbb856;
+        }
+
+        .btn-danger {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .btn-danger:hover {
+            background: #2a1515;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .btn-group .btn {
+            justify-content: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .stat-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px;
+            text-align: center;
+        }
+
+        .stat-box .num {
+            font-size: 18px;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            color: var(--accent-gold);
+            display: block;
+        }
+
+        .stat-box .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .event-log-header {
+            padding: 8px 18px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .event-log-header .title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-secondary);
+        }
+
+        .event-log-header .count {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .event-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+            background: var(--bg-primary);
+        }
+
+        .event-log::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .event-log::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .event-log::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 2px;
+        }
+
+        /* ===== Event Entries ===== */
+        .event-entry {
+            padding: 5px 18px;
+            font-size: 12px;
+            line-height: 1.5;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            transition: background 0.1s;
+            border-left: 2px solid transparent;
+            position: relative;
+        }
+
+        .event-entry:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .event-entry .evt-time {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            padding-top: 1px;
+            min-width: 65px;
+            flex-shrink: 0;
+        }
+
+        .event-entry .evt-body {
+            flex: 1;
+            min-width: 0;
+            word-break: break-word;
+        }
+
+        .event-entry .evt-tag {
+            display: inline-block;
+            font-size: 9px;
+            padding: 0 6px;
+            border-radius: 3px;
+            margin-right: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            vertical-align: middle;
+            line-height: 18px;
+        }
+
+        .event-entry .evt-label {
+            font-weight: 500;
+        }
+
+        /* Event type coloring */
+        .event-workflow {
+            border-left-color: var(--text-muted);
+        }
+
+        .event-step {
+            border-left-color: var(--accent-gold);
+        }
+
+        .event-agent-think {
+            border-left-color: var(--accent-purple);
+        }
+
+        .event-agent-act {
+            border-left-color: var(--accent-blue);
+        }
+
+        .event-agent-ask {
+            border-left-color: var(--accent-cyan);
+        }
+
+        .event-user-input {
+            border-left-color: var(--accent-green);
+        }
+
+        .event-llm-start {
+            border-left-color: var(--accent-orange);
+        }
+
+        .event-llm-done {
+            border-left-color: var(--accent-orange);
+        }
+
+        .event-llm-error {
+            border-left-color: var(--accent-orange);
+        }
+
+        .event-tool {
+            border-left-color: #d48a3a;
+        }
+
+        .event-parallel {
+            border-left-color: var(--accent-blue);
+        }
+
+        .event-system {
+            border-left-color: var(--text-muted);
+        }
+
+        .event-session {
+            border-left-color: transparent;
+            font-size: 10px;
+            color: var(--text-muted);
+            padding-left: 30px;
+        }
+
+        .event-error {
+            border-left-color: var(--accent-red);
+            background: rgba(212, 90, 74, 0.06);
+        }
+
+        .tag-workflow {
+            background: rgba(90, 106, 122, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .tag-step {
+            background: rgba(201, 168, 76, 0.2);
+            color: var(--accent-gold);
+        }
+
+        .tag-think {
+            background: rgba(154, 106, 201, 0.2);
+            color: var(--accent-purple);
+        }
+
+        .tag-act {
+            background: rgba(74, 143, 212, 0.2);
+            color: var(--accent-blue);
+        }
+
+        .tag-ask {
+            background: rgba(58, 180, 201, 0.15);
+            color: var(--accent-cyan);
+        }
+
+        .tag-user {
+            background: rgba(58, 180, 122, 0.15);
+            color: var(--accent-green);
+        }
+
+        .tag-llm {
+            background: rgba(212, 138, 58, 0.15);
+            color: var(--accent-orange);
+        }
+
+        .tag-tool {
+            background: rgba(212, 138, 58, 0.15);
+            color: #d48a3a;
+        }
+
+        .tag-parallel {
+            background: rgba(74, 143, 212, 0.15);
+            color: var(--accent-blue);
+        }
+
+        .tag-system {
+            background: rgba(90, 106, 122, 0.1);
+            color: var(--text-secondary);
+        }
+
+        .tag-ans {
+            background: rgba(58, 180, 201, 0.15);
+            color: var(--accent-cyan);
+        }
+
+        .tag-error {
+            background: rgba(212, 90, 74, 0.2);
+            color: var(--accent-red);
+        }
+
+        /* ===== Input Area ===== */
+        .input-area {
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            padding: 10px 18px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .input-area input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: var(--font-sans);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-area input:focus {
+            border-color: var(--accent-gold-dim);
+        }
+
+        .input-area input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input-area input:disabled {
+            opacity: 0.5;
+        }
+
+        .input-area .btn {
+            padding: 8px 16px;
+        }
+
+        .input-hint {
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 0 8px;
+        }
+
+        /* ===== Scrollbar ===== */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 2px;
+        }
+
+        /* ===== JSON viewer ===== */
+        .evt-json {
+            display: none;
+            margin-top: 4px;
+            padding: 6px 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .event-entry.expanded .evt-json {
+            display: block;
+        }
+
+        .evt-expand {
+            cursor: pointer;
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-left: 4px;
+            user-select: none;
+        }
+
+        .evt-expand:hover {
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="logo">
+            <div class="logo-icon">⚖</div>
+            <span>合同智能生成 · SSE 测试台</span>
+        </div>
+        <div class="header-controls">
+            <span class="status-badge" id="connBadge">
+                <span class="dot" id="connDot"></span>
+                <span id="connText">未连接</span>
+            </span>
+            <span class="status-badge">
+                <span id="sessionLabel">Session: —</span>
+            </span>
+        </div>
+    </header>
+
+    <div class="main-panels">
+
+        <!-- Left Panel -->
+        <div class="panel-left">
+            <div class="section">
+                <div class="section-title">会话控制</div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="btnStart" onclick="startSession()">▶ 新建会话</button>
+                    <button class="btn btn-danger" id="btnDestroy" onclick="destroySession()" disabled>✕ 销毁会话</button>
+                    <button class="btn" id="btnClear" onclick="clearLog()">⌘ 清空日志</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">会话状态</div>
+                <div class="info-row"><span>步骤</span><span class="val" id="infoStep">—</span></div>
+                <div class="info-row"><span>Agent</span><span class="val" id="infoAgent">—</span></div>
+                <div class="info-row"><span>阶段</span><span class="val idle" id="infoStatus">idle</span></div>
+                <div class="info-row"><span>耗时</span><span class="val" id="infoDuration">—</span></div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">事件统计</div>
+                <div class="stats-grid">
+                    <div class="stat-box"><span class="num" id="statTotal">0</span><span class="label">事件</span></div>
+                    <div class="stat-box"><span class="num" id="statTokens">0</span><span class="label">输入/输出</span>
+                    </div>
+                    <div class="stat-box"><span class="num" id="statSteps">0</span><span class="label">步骤</span></div>
+                    <div class="stat-box"><span class="num" id="statErrors">0</span><span class="label">错误</span></div>
+                </div>
+            </div>
+
+            <div class="section" style="flex:1; border-bottom:none;">
+                <div class="section-title">连接方式</div>
+                <div class="info-row" style="flex-direction:column; gap:4px; align-items:stretch;">
+                    <span style="font-size:11px;color:var(--text-muted);">服务端地址</span>
+                    <input type="text" id="serverUrl" value="http://localhost:8000"
+                        style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:6px 8px;color:var(--text-primary);font-size:11px;font-family:var(--font-mono);outline:none;">
+                </div>
+            </div>
+        </div>
+
+        <!-- Resize Handle 1 -->
+        <div class="resize-handle" data-target="panel-left" data-next="panel-center"></div>
+
+        <!-- Center Panel: Stream Output -->
+        <div class="panel-center" id="panelCenter">
+            <div class="stream-header">
+                <span class="title">💬 实时输出</span>
+                <span class="count" id="streamStatus"
+                    style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">等待中</span>
+            </div>
+            <div class="outline-toggle" id="outlineToggle" onclick="toggleOutlineDrawer()">
+                <span>📋 合同大纲</span>
+                <span class="badge" id="outlineBadge">0</span>
+                <span class="arrow">▶</span>
+            </div>
+            <div class="outline-drawer" id="outlineDrawer">
+                <div
+                    style="display:flex;align-items:center;gap:8px;padding:0 0 6px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
+                    <span style="font-size:10px;color:var(--text-muted);flex:1;">大纲结构</span>
+                    <span style="font-size:10px;cursor:pointer;color:var(--accent-cyan);"
+                        onclick="toggleAllOutlineNodes(true)">全部展开</span>
+                    <span style="font-size:10px;cursor:pointer;color:var(--text-muted);"
+                        onclick="toggleAllOutlineNodes(false)">全部折叠</span>
+                </div>
+                <div class="outline-placeholder" id="outlinePlaceholder">等待大纲生成…</div>
+                <div class="outline-tree" id="outlineTree"></div>
+            </div>
+            <div class="stream-body">
+                <div class="stream-timeline" id="streamTimeline"></div>
+                <div class="stream-placeholder" id="streamPlaceholder">
+                    ← 新建会话后，LLM 输出将在此实时显示
+                </div>
+            </div>
+        </div>
+
+        <!-- Resize Handle 2 -->
+        <div class="resize-handle" data-target="panel-center" data-next="panel-right"></div>
+
+        <!-- Right Panel -->
+        <div class="panel-right">
+            <div class="event-log-header">
+                <span class="title">📋 事件流</span>
+                <span class="count" id="eventCount">0 条</span>
+            </div>
+            <div class="event-log" id="eventLog"></div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <span class="input-hint">✎ 用户输入</span>
+                <input type="text" id="userInput" placeholder="等待交互步骤..." disabled>
+                <button class="btn btn-primary" id="btnSend" onclick="sendUserInput()" disabled>发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== State =====
+        let sessionId = null;
+        let eventSource = null;
+        let eventCount = 0;
+        let totalPromptTokens = 0;
+        let totalCompletionTokens = 0;
+        let currentStepNumber = 0;
+        let errorCount = 0;
+        let workflowStartTime = null;
+        let llmRound = 0;
+        let _saveCounter = 0;
+        let _lastEventId = '';
+        let _llmStartTs = 0;
+        let _outlineJson = '';
+        let _outlineChapters = 0;
+
+        // ===== localStorage 持久化 =====
+        const LS_KEY = 'contract_gen_session';
+
+        function saveSessionState() {
+            const state = {
+                sessionId,
+                eventLog: document.getElementById('eventLog').innerHTML,
+                streamHTML: document.getElementById('streamTimeline').innerHTML,
+                eventCount,
+                totalPromptTokens,
+                totalCompletionTokens,
+                currentStepNumber,
+                errorCount,
+                llmRound,
+                workflowStartTime,
+                lastEventId: _lastEventId,
+                outlineJson: _outlineJson,
+                outlineChapters: _outlineChapters,
+                outlineOpen: document.getElementById('outlineDrawer').classList.contains('open'),
+                streamStatus: document.getElementById('streamStatus').textContent,
+                placeholderHidden: document.getElementById('streamPlaceholder').style.display === 'none',
+                sessionLabel: document.getElementById('sessionLabel').textContent,
+                infoStep: document.getElementById('infoStep').textContent,
+                infoAgent: document.getElementById('infoAgent').textContent,
+                infoStatus: document.getElementById('infoStatus').textContent,
+                infoStatusClass: document.getElementById('infoStatus').className,
+            };
+            try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (_) { }
+        }
+
+        function loadSessionState() {
+            try {
+                const raw = localStorage.getItem(LS_KEY);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (_) { return null; }
+        }
+
+        function clearSessionState() {
+            localStorage.removeItem(LS_KEY);
+        }
+
+        function restoreFromLocalStorage() {
+            const saved = loadSessionState();
+            if (!saved || !saved.sessionId) return null;
+
+            sessionId = saved.sessionId;
+            eventCount = saved.eventCount || 0;
+            totalPromptTokens = saved.totalPromptTokens || 0;
+            totalCompletionTokens = saved.totalCompletionTokens || 0;
+            currentStepNumber = saved.currentStepNumber || 0;
+            errorCount = saved.errorCount || 0;
+            llmRound = saved.llmRound || 0;
+            workflowStartTime = saved.workflowStartTime || null;
+            _lastEventId = saved.lastEventId || '';
+            _outlineJson = saved.outlineJson || '';
+            _outlineChapters = saved.outlineChapters || 0;
+
+            document.getElementById('eventLog').innerHTML = saved.eventLog || '';
+            document.getElementById('streamTimeline').innerHTML = saved.streamHTML || '';
+            document.getElementById('streamStatus').textContent = saved.streamStatus || '等待中';
+            document.getElementById('streamPlaceholder').style.display = saved.placeholderHidden ? 'none' : '';
+            document.getElementById('sessionLabel').textContent = saved.sessionLabel || `Session: ${sessionId.slice(0, 12)}...`;
+            document.getElementById('infoStep').textContent = saved.infoStep || '—';
+            document.getElementById('infoAgent').textContent = saved.infoAgent || '—';
+            document.getElementById('infoStatus').textContent = saved.infoStatus || 'idle';
+            document.getElementById('infoStatus').className = saved.infoStatusClass || 'val idle';
+            document.getElementById('btnDestroy').disabled = false;
+
+            // 恢复大纲
+            document.getElementById('outlineBadge').textContent = _outlineChapters;
+            if (_outlineJson) {
+                tryRenderOutline();
+                // 恢复抽屉开合状态
+                if (saved.outlineOpen) {
+                    document.getElementById('outlineDrawer').classList.add('open');
+                    document.getElementById('outlineToggle').classList.add('open');
+                }
+            }
+
+            updateStats();
+            document.getElementById('eventCount').textContent = `${eventCount} 条`;
+
+            return saved;
+        }
+
+        function getBaseUrl() {
+            return document.getElementById('serverUrl').value.replace(/\/+$/, '');
+        }
+
+        // ===== API Calls =====
+        async function startSession() {
+            const baseUrl = getBaseUrl();
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStart').textContent = '⏳ 启动中...';
+            clearLog();
+
+            try {
+                const resp = await fetch(`${baseUrl}/api/contract/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timeout_seconds: 3600
+                    })
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                sessionId = data.session_id;
+                document.getElementById('sessionLabel').textContent = `Session: ${sessionId.slice(0, 12)}...`;
+                document.getElementById('btnDestroy').disabled = false;
+                addEvent('system', 'info', '', `Session 已创建: ${sessionId}`);
+                connectSSE();
+                saveSessionState();
+            } catch (e) {
+                addEvent('error', 'error', '启动失败', `❌ ${e.message}`);
+                document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStart').textContent = '▶ 新建会话';
+            }
+        }
+
+        function connectSSE(lastEventId) {
+            if (eventSource) { eventSource.close(); eventSource = null; }
+
+            const baseUrl = getBaseUrl();
+            let url = `${baseUrl}/api/contract/generate/sse?session_id=${sessionId}`;
+            if (lastEventId) url += `&lastEventId=${encodeURIComponent(lastEventId)}`;
+            eventSource = new EventSource(url);
+
+            setConnStatus('connecting', '连接中...');
+
+            eventSource.onopen = () => {
+                setConnStatus('connected', '已连接');
+                document.getElementById('userInput').disabled = false;
+                document.getElementById('btnSend').disabled = false;
+                updateSessionStatus('running');
+            };
+
+            eventSource.onerror = () => {
+                if (eventSource.readyState === EventSource.CLOSED) {
+                    setConnStatus('disconnected', '已断开');
+                    document.getElementById('userInput').disabled = true;
+                    document.getElementById('btnSend').disabled = true;
+                }
+            };
+
+            eventSource.onmessage = (e) => {
+                try {
+                    const evt = JSON.parse(e.data);
+                    if (evt.event_id) {
+                        _lastEventId = evt.event_id;
+                    }
+                    renderEvent(evt);
+                } catch (_) { }
+            };
+        }
+
+        function destroySession() {
+            if (!sessionId) return;
+            const baseUrl = getBaseUrl();
+            fetch(`${baseUrl}/api/contract/session/${sessionId}`, { method: 'DELETE' })
+                .catch(() => { });
+            if (eventSource) { eventSource.close(); eventSource = null; }
+            sessionId = null;
+            document.getElementById('sessionLabel').textContent = 'Session: —';
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnStart').textContent = '▶ 新建会话';
+            document.getElementById('btnDestroy').disabled = true;
+            document.getElementById('userInput').disabled = true;
+            document.getElementById('btnSend').disabled = true;
+            setConnStatus('disconnected', '已断开');
+            updateSessionStatus('idle');
+            addEvent('system', 'info', '', 'Session 已销毁');
+            clearSessionState();
+        }
+
+        async function sendUserInput() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if (!text || !sessionId) return;
+            input.value = '';
+            const baseUrl = getBaseUrl();
+            try {
+                await fetch(`${baseUrl}/api/contract/user-input`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, text })
+                });
+            } catch (e) {
+                addEvent('error', 'error', '发送失败', `❌ ${e.message}`);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            eventCount = 0; totalPromptTokens = 0; totalCompletionTokens = 0; currentStepNumber = 0; errorCount = 0;
+            llmRound = 0; _outlineJson = ''; _outlineChapters = 0;
+            updateStats();
+            document.getElementById('eventCount').textContent = '0 条';
+            workflowStartTime = null;
+            // 重置流式面板
+            document.getElementById('streamTimeline').innerHTML = '';
+            document.getElementById('streamPlaceholder').style.display = '';
+            document.getElementById('streamStatus').textContent = '等待中';
+            // 重置大纲
+            document.getElementById('outlineTree').innerHTML = '';
+            document.getElementById('outlinePlaceholder').style.display = '';
+            document.getElementById('outlineBadge').textContent = '0';
+            document.getElementById('outlineDrawer').classList.remove('open');
+            document.getElementById('outlineToggle').classList.remove('open');
+            if (sessionId) saveSessionState();
+        }
+
+        // ===== Render Events =====
+        function renderEvent(evt) {
+            const log = document.getElementById('eventLog');
+            const type = evt.event_type || evt.type || 'unknown';
+            const data = evt.data || {};
+            const agent = evt.agent || '';
+            const step = evt.step;
+            const ts = evt.timestamp || Date.now() / 1000;
+            const id = evt.event_id || '';
+
+            eventCount++;
+            if (type === 'error') errorCount++;
+            updateStats();
+            document.getElementById('eventCount').textContent = `${eventCount} 条`;
+
+            if (type === 'session.ping') return; // ignore pings in display
+
+            // Build entry
+            const entry = document.createElement('div');
+            entry.className = 'event-entry';
+
+            const timeStr = new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+            let tag = '', label = '', content = '';
+
+            // Determine styling based on type
+            if (type === 'workflow.start' || type === 'workflow.complete') {
+                entry.classList.add('event-workflow');
+                tag = 'flow';
+                label = type === 'workflow.start' ? '流程启动' : '流程完成';
+                content = JSON.stringify(data);
+            } else if (type === 'step.start') {
+                entry.classList.add('event-step');
+                tag = `S${step}`;
+                label = data.step_name || `步骤 ${step}`;
+                content = `开始执行「${data.step_name}」`;
+            } else if (type === 'step.complete') {
+                entry.classList.add('event-step');
+                tag = `S${step}`;
+                label = data.step_name || `步骤 ${step}`;
+                const dur = data.duration ? ` (${data.duration.toFixed(1)}s)` : '';
+                content = `✅ ${data.step_name} 完成${dur}`;
+            } else if (type === 'step.error') {
+                entry.classList.add('event-error');
+                tag = `S${step}`;
+                label = data.step_name || `步骤 ${step}`;
+                content = `❌ ${data.step_name} 失败: ${data.error}`;
+            } else if (type === 'agent.start') {
+                entry.classList.add('event-step');
+                tag = 'agent';
+                label = agent;
+                content = `启动 Agent: ${agent}`;
+            } else if (type === 'agent.end') {
+                entry.classList.add('event-step');
+                tag = 'agent';
+                label = agent;
+                content = `Agent 结束: ${agent} (${(data.duration || 0).toFixed(1)}s)`;
+            } else if (type === 'agent.think') {
+                entry.classList.add('event-agent-think');
+                tag = 'think';
+                label = agent;
+                content = data.content || '';
+            } else if (type === 'agent.act') {
+                entry.classList.add('event-agent-act');
+                tag = data.act_type || 'act';
+                label = agent;
+                const params = data.params || {};
+                content = `${data.act_type || '?'} ${JSON.stringify(params)}`;
+                // 在中间的流面板 act 块中注入 tool 信息
+                if (data.act_type === 'use_tool' || data.act_type === 'tool_call') {
+                    const actBlock = document.querySelector('.tc-reason.current-streaming[data-tc-type="act"]') ||
+                        document.querySelector('.tc-reason.tc-act.current-streaming');
+                    if (actBlock) {
+                        const body = actBlock.querySelector('.tc-body');
+                        if (body) {
+                            const toolName = params.tool_name || '?';
+                            const toolParams = JSON.stringify(params.tool_params || {}, null, 2);
+                            body.innerHTML += formatContent(`\n\n[🔧 调用工具: ${toolName}]\n参数: ${toolParams}\n`);
+                            body.scrollTop = body.scrollHeight;
+                        }
+                    }
+                }
+            } else if (type === 'agent.think.stream') {
+                document.getElementById('streamPlaceholder').style.display = 'none';
+                document.getElementById('streamStatus').textContent = '思考中…';
+                appendStreamContent('think', data.text || '');
+                return;
+            } else if (type === 'agent.answer.stream') {
+                document.getElementById('streamPlaceholder').style.display = 'none';
+                document.getElementById('streamStatus').textContent = '输出中…';
+                appendStreamContent('answer', data.text || '');
+                return;
+            } else if (type === 'agent.act.stream') {
+                document.getElementById('streamPlaceholder').style.display = 'none';
+                appendStreamContent('act', data.text || '');
+                return;
+            } else if (type === 'agent.outline.stream') {
+                _outlineJson = (data.text || '');
+                tryRenderOutline();
+                return;
+            } else if (type === 'agent.ask') {
+                document.getElementById('streamStatus').textContent = '等待输入…';
+                entry.classList.add('event-agent-ask');
+                tag = 'ask';
+                label = agent;
+                content = `🤖 ${data.question || ''}`;
+                document.getElementById('userInput').placeholder = '请输入您的回复...';
+                document.getElementById('userInput').focus();
+            } else if (type === 'user.input') {
+                entry.classList.add('event-user-input');
+                tag = 'user';
+                label = '';
+                content = `👤 ${data.text || ''}`;
+                document.getElementById('streamStatus').textContent = '已收到输入';
+                addUserBlock(data.text || '');
+            } else if (type === 'llm.start') {
+                entry.classList.add('event-llm-start');
+                tag = 'llm';
+                label = data.model || '';
+                content = `LLM 调用开始 [${data.model}]`;
+                llmRound++;
+                _llmStartTs = Date.now();
+                document.getElementById('streamPlaceholder').style.display = 'none';
+                document.getElementById('streamStatus').textContent = 'LLM 调用…';
+                // 新轮次开始，清除所有 current-streaming 标记，确保流式内容分块
+                document.querySelectorAll('.tc-block.current-streaming').forEach(b => b.classList.remove('current-streaming'));
+            } else if (type === 'llm.token') {
+                return;
+            } else if (type === 'llm.done') {
+                entry.classList.add('event-llm-done');
+                tag = 'llm';
+                label = data.model || '';
+                const usage = data.usage || {};
+                const tokens = usage.total_tokens ? ` (${usage.completion_tokens || 0} 输出 / ${usage.total_tokens} 总计)` : '';
+                if (usage.completion_tokens) totalCompletionTokens += usage.completion_tokens;
+                if (usage.prompt_tokens) totalPromptTokens += usage.prompt_tokens;
+                content = `LLM 完成${tokens}`;
+                document.getElementById('streamStatus').textContent = 'LLM 完成';
+                entry.setAttribute('data-full', data.full_text || '');
+                // 更新当前流式块的用时
+                const dur = ((Date.now() - _llmStartTs) / 1000).toFixed(1);
+                const cur = document.querySelector('.tc-block.current-streaming');
+                if (cur) {
+                    let durEl = cur.querySelector('.tc-duration');
+                    if (durEl) durEl.textContent = ` ${dur}s`;
+                }
+            } else if (type === 'llm.error') {
+                entry.classList.add('event-error');
+                tag = 'llm';
+                label = data.model || '';
+                content = `LLM 错误 (重试${data.retry_count || 0}): ${data.error}`;
+            } else if (type === 'tool.call' || type === 'tool.result') {
+                entry.classList.add('event-tool');
+                tag = type === 'tool.call' ? 'call' : 'result';
+                label = data.tool_name || '';
+                content = type === 'tool.call'
+                    ? `🔧 ${data.tool_name} ${JSON.stringify(data.params || {})}`
+                    : `📎 ${data.tool_name}: ${data.success ? '成功' : '失败'} — ${(data.summary || '').slice(0, 100)}`;
+            } else if (type === 'parallel.start' || type === 'parallel.complete') {
+                entry.classList.add('event-parallel');
+                tag = 'parallel';
+                label = data.group || '';
+                content = type === 'parallel.start'
+                    ? `并行启动: ${(data.agents || []).join(', ')}`
+                    : `并行完成: ${data.agents_count || 0} 个 Agent`;
+            } else if (type === 'parallel.agent_start') {
+                entry.classList.add('event-parallel');
+                tag = 'start';
+                label = agent || '';
+                content = `⏳ ${agent} 开始`;
+            } else if (type === 'parallel.agent_complete') {
+                entry.classList.add('event-parallel');
+                tag = 'done';
+                label = agent || '';
+                content = `✅ ${agent} 完成 (${(data.duration || 0).toFixed(1)}s)`;
+            } else if (type === 'system') {
+                entry.classList.add('event-system');
+                tag = 'sys';
+                label = '';
+                content = data.message || JSON.stringify(data);
+            } else if (type === 'session.ping' || type === 'session.timeout' || type === 'session.end') {
+                entry.classList.add('event-session');
+                content = `[${type}] ${JSON.stringify(data)}`;
+            } else if (type === 'error') {
+                entry.classList.add('event-error');
+                tag = 'error';
+                label = data.source || '';
+                content = `❌ [${data.source || ''}] ${data.type || ''}: ${data.message || ''}`;
+            } else {
+                entry.classList.add('event-system');
+                content = `[${type}] ${JSON.stringify(data)}`;
+            }
+
+            // Build inner HTML
+            entry.innerHTML = `
+    <span class="evt-time">${timeStr}</span>
+    <div class="evt-body">
+      ${tag ? `<span class="evt-tag tag-${tag}">${tag}</span>` : ''}
+      ${label ? `<span class="evt-label">${label}</span> ` : ''}
+      <span>${content}</span>
+      <span class="evt-expand" onclick="toggleJson(this)">▼</span>
+      <div class="evt-json">${JSON.stringify(evt, null, 2)}</div>
+    </div>
+  `;
+
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+
+            // Update session info
+            if (type === 'step.start') {
+                currentStepNumber = step || currentStepNumber;
+                document.getElementById('infoStep').textContent = `${step || ''} ${data.step_name || ''}`;
+            }
+            if (type === 'agent.start' || type === 'agent.think' || type === 'agent.act' || type === 'agent.ask') {
+                document.getElementById('infoAgent').textContent = agent || '';
+            }
+            if (type === 'workflow.complete' || type === 'workflow.start') {
+                if (type === 'workflow.start') workflowStartTime = ts;
+                if (type === 'workflow.complete' && workflowStartTime) {
+                    document.getElementById('infoDuration').textContent = `${(ts - workflowStartTime).toFixed(0)}s`;
+                }
+            }
+            _saveCounter++;
+            if (_saveCounter % 5 === 0) saveSessionState();
+        }
+
+        function toggleJson(el) {
+            const entry = el.closest('.event-entry');
+            entry.classList.toggle('expanded');
+            el.textContent = entry.classList.contains('expanded') ? '▲' : '▼';
+        }
+
+        // ===== UI Helpers =====
+        function setConnStatus(state, text) {
+            const dot = document.getElementById('connDot');
+            const txt = document.getElementById('connText');
+            dot.className = 'dot';
+            if (state === 'connected') dot.classList.add('connected');
+            else if (state === 'connecting') dot.classList.add('running');
+            else if (state === 'error') dot.classList.add('error');
+            txt.textContent = text;
+        }
+
+        function updateSessionStatus(status) {
+            const el = document.getElementById('infoStatus');
+            el.className = `val ${status}`;
+            el.textContent = status;
+        }
+
+        function updateStats() {
+            document.getElementById('statTotal').textContent = eventCount;
+            const tokenLabel = totalPromptTokens || totalCompletionTokens
+                ? `${totalPromptTokens}/${totalCompletionTokens}`
+                : '0';
+            document.getElementById('statTokens').textContent = tokenLabel;
+            document.getElementById('statSteps').textContent = currentStepNumber;
+            document.getElementById('statErrors').textContent = errorCount;
+        }
+
+        function formatContent(text) {
+            const html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+                .replace(/\n/g, '<br>');
+            return html;
+        }
+
+        // ===== Stream Panel Helpers (Collapsible Reasoning Chain) =====
+
+        function appendStreamContent(type, text) {
+            const container = document.getElementById('streamTimeline');
+            const scrollContainer = container.closest('.stream-body');
+            if (type === 'think' || type === 'act') {
+                let block = container.querySelector(`.tc-reason.current-streaming`);
+                if (!block || block.dataset.tcType !== type) {
+                    if (block) block.classList.remove('current-streaming');
+                    block = document.createElement('div');
+                    block.className = `tc-block tc-reason tc-agent collapsed ${type === 'act' ? 'tc-act' : ''}`;
+                    block.dataset.tcType = type;
+                    block._previewLen = 0;
+                    block.onclick = function (e) { if (e.target.closest('.tc-body')) return; this.classList.toggle('collapsed'); };
+                    const labels = { think: '💭 思考', act: '⚡ 动作' };
+                    block.innerHTML = `<div class="tc-header">
+                        <span class="tc-label">${labels[type] || type}</span>
+                        <span class="tc-duration"></span>
+                        <span class="tc-arrow">▶</span>
+                    </div><div class="tc-body"></div>`;
+                    container.appendChild(block);
+                    block.classList.add('current-streaming');
+                    block.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                }
+                const body = block.querySelector('.tc-body');
+                body.innerHTML += formatContent(text);
+                body.scrollTop = body.scrollHeight;
+                if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                // 实时更新 header 预览（前 50 字纯文本）
+                const plain = body.textContent.replace(/\n+/, ' ').substring(0, 50);
+                if (plain.length >= block._previewLen) {
+                    block._previewLen = plain.length;
+                    const labelEl = block.querySelector('.tc-label');
+                    if (labelEl) {
+                        const prefix = type === 'think' ? '💭 思考' : '⚡ 动作';
+                        labelEl.textContent = plain ? `${prefix} ${plain}…` : prefix;
+                    }
+                }
+            } else if (type === 'answer') {
+                let block = container.querySelector('.tc-block.tc-answer.current-streaming');
+                if (!block) {
+                    block = document.createElement('div');
+                    block.className = 'tc-block tc-answer tc-agent';
+                    block.innerHTML = `<div class="tc-header"><span class="tc-label">🤖 回答</span><span class="tc-duration"></span></div><div class="tc-body"></div>`;
+                    container.appendChild(block);
+                    block.classList.add('current-streaming');
+                    block.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                }
+                const body = block.querySelector('.tc-body');
+                body.innerHTML += formatContent(text);
+                body.scrollTop = body.scrollHeight;
+                if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            }
+        }
+
+        function addUserBlock(text) {
+            const container = document.getElementById('streamTimeline');
+            const scrollContainer = container.closest('.stream-body');
+            let block = container.querySelector('.tc-block.current-streaming');
+            if (block) block.classList.remove('current-streaming');
+            const blockEl = document.createElement('div');
+            blockEl.className = 'tc-block tc-user';
+            blockEl.innerHTML = `<div class="tc-header"><span class="tc-label">👤 用户</span></div>
+                <div class="tc-body">${formatContent(text)}</div>`;
+            container.appendChild(blockEl);
+            blockEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        }
+
+        // ===== Outline Helpers =====
+
+        function tryRenderOutline() {
+            let parsed = null;
+            try { parsed = JSON.parse(_outlineJson); } catch (_) { return; }
+            if (!parsed || typeof parsed !== 'object') return;
+            // 兼容两种格式：带 "标准化模板文本" 包裹的大纲 / 直接是合同结构的无包裹格式
+            let data = parsed;
+            if (data['标准化模板文本'] && typeof data['标准化模板文本'] === 'object') {
+                data = data['标准化模板文本'];
+            }
+            if (!data['合同首部'] && !Array.isArray(data['正文章节'])) return;
+            const tree = document.getElementById('outlineTree');
+            const placeholder = document.getElementById('outlinePlaceholder');
+            tree.innerHTML = '';
+            placeholder.style.display = 'none';
+
+            // 自动展开抽屉
+            const toggle = document.getElementById('outlineToggle');
+            const drawer = document.getElementById('outlineDrawer');
+            if (!drawer.classList.contains('open')) {
+                drawer.classList.add('open');
+                toggle.classList.add('open');
+            }
+
+            let chapters = 0;
+            const root = document.createElement('ul');
+            root.className = 'outline-tree';
+
+            // 合同首部
+            if (data['合同首部']) {
+                const li = document.createElement('li');
+                li.className = 'collapsed';
+                const text = data['合同首部'];
+                li.innerHTML = `<span class="node-toggle" onclick="this.parentElement.classList.toggle('collapsed')">▶</span><span class="node-key">📄 合同首部</span>
+                    <ul><li><span class="node-str">${text}</span></li></ul>`;
+                root.appendChild(li);
+            }
+
+            // 正文章节
+            const sections = data['正文章节'];
+            if (Array.isArray(sections)) {
+                sections.forEach(section => {
+                    chapters++;
+                    const chapNum = section['章节编号'] || '';
+                    const chapTitle = section['章节标题'] || '';
+                    const li = document.createElement('li');
+                    li.className = 'collapsed';
+                    li.innerHTML = `<span class="node-toggle" onclick="this.parentElement.classList.toggle('collapsed')">▶</span><span class="node-key">${chapNum} ${chapTitle}</span>`;
+
+                    const clauses = section['条款列表'];
+                    if (Array.isArray(clauses) && clauses.length > 0) {
+                        const ul2 = document.createElement('ul');
+                        clauses.forEach(clause => {
+                            const cNum = clause['条款编号'] || '';
+                            const cDesc = clause['条款大致说明'] || '';
+                            const li2 = document.createElement('li');
+                            li2.className = 'collapsed';
+                            li2.innerHTML = `<span class="node-toggle" onclick="this.parentElement.classList.toggle('collapsed')">▶</span><span class="node-key">${cNum}</span> <span class="node-val">${cDesc}</span>`;
+
+                            const subClauses = clause['子条款列表'];
+                            if (Array.isArray(subClauses) && subClauses.length > 0) {
+                                const ul3 = document.createElement('ul');
+                                subClauses.forEach(sub => {
+                                    const sNum = sub['子条款编号'] || '';
+                                    const sDesc = sub['子条款大致说明'] || '';
+                                    const li3 = document.createElement('li');
+                                    li3.innerHTML = `<span class="node-key">${sNum}</span> <span class="node-val">${sDesc}</span>`;
+
+                                    const subSub = sub['子子条款列表'];
+                                    if (Array.isArray(subSub) && subSub.length > 0) {
+                                        const ul4 = document.createElement('ul');
+                                        subSub.forEach(ss => {
+                                            const ssNum = ss['子子条款编号'] || '';
+                                            const ssDesc = ss['子子条款大致说明'] || '';
+                                            const li4 = document.createElement('li');
+                                            li4.innerHTML = `<span class="node-key">${ssNum}</span> <span class="node-val">${ssDesc}</span>`;
+                                            ul4.appendChild(li4);
+                                        });
+                                        li3.appendChild(ul4);
+                                    }
+                                    ul3.appendChild(li3);
+                                });
+                                li2.appendChild(ul3);
+                            }
+                            ul2.appendChild(li2);
+                        });
+                        li.appendChild(ul2);
+                    }
+                    root.appendChild(li);
+                });
+            }
+
+            // 合同尾部
+            if (data['合同尾部']) {
+                const li = document.createElement('li');
+                li.className = 'collapsed';
+                const text = data['合同尾部'];
+                li.innerHTML = `<span class="node-toggle" onclick="this.parentElement.classList.toggle('collapsed')">▶</span><span class="node-key">📄 合同尾部</span>
+                    <ul><li><span class="node-str">${text}</span></li></ul>`;
+                root.appendChild(li);
+            }
+
+            tree.appendChild(root);
+            _outlineChapters = chapters;
+            document.getElementById('outlineBadge').textContent = chapters;
+        }
+
+        function toggleOutlineDrawer() {
+            const drawer = document.getElementById('outlineDrawer');
+            const toggle = document.getElementById('outlineToggle');
+            drawer.classList.toggle('open');
+            toggle.classList.toggle('open');
+        }
+
+        function toggleAllOutlineNodes(expand) {
+            const tree = document.getElementById('outlineTree');
+            tree.querySelectorAll('li.collapsed').forEach(li => {
+                if (expand) li.classList.remove('collapsed');
+            });
+            tree.querySelectorAll('li:not(.collapsed)').forEach(li => {
+                if (!expand && li.querySelector('ul')) li.classList.add('collapsed');
+            });
+        }
+
+        function addEvent(type, tag, label, content) {
+            // fallback for system-generated events
+            const log = document.getElementById('eventLog');
+            eventCount++;
+            updateStats();
+            document.getElementById('eventCount').textContent = `${eventCount} 条`;
+
+            const entry = document.createElement('div');
+            entry.className = `event-entry event-${type}`;
+            const timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            entry.innerHTML = `
+    <span class="evt-time">${timeStr}</span>
+    <div class="evt-body">
+      ${tag ? `<span class="evt-tag tag-${tag}">${tag}</span>` : ''}
+      ${label ? `<span class="evt-label">${label}</span> ` : ''}
+      <span>${content}</span>
+    </div>
+  `;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Enter key to send
+        document.addEventListener('DOMContentLoaded', () => {
+            // 尝试从 localStorage 恢复会话
+            const saved = restoreFromLocalStorage();
+            if (saved) {
+                connectSSE(saved.lastEventId || undefined);
+            }
+
+            document.getElementById('userInput').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUserInput(); }
+            });
+
+            // ===== Resize Handles =====
+            let dragTarget = null;
+            let dragNext = null;
+            let startX = 0;
+            let startW = 0;
+            let startNextW = 0;
+
+            document.querySelectorAll('.resize-handle').forEach(h => {
+                h.addEventListener('mousedown', (e) => {
+                    dragTarget = document.querySelector(`.${h.dataset.target}`);
+                    dragNext = document.querySelector(`.${h.dataset.next}`);
+                    startX = e.clientX;
+                    startW = dragTarget.offsetWidth;
+                    startNextW = dragNext.offsetWidth;
+                    h.classList.add('active');
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                });
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!dragTarget) return;
+                const dx = e.clientX - startX;
+                const newW = Math.max(180, startW + dx);
+                dragTarget.style.width = newW + 'px';
+                if (dragNext && dragNext.classList.contains('panel-center')) {
+                    dragNext.style.width = Math.max(200, startNextW - dx) + 'px';
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (dragTarget) {
+                    document.querySelectorAll('.resize-handle').forEach(h => h.classList.remove('active'));
+                    dragTarget = null;
+                    dragNext = null;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        });
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,12 @@
+{
+    "api_key_name": "DeepSeekKey",
+    "base_url": "https://api.deepseek.com",
+    "model_id": "deepseek-v4-pro",
+    "fallback_model_id": "deepseek-v4-flash",
+    "temperature": 0,
+    "timeout": 200,
+    "max_retries": 3,
+    "base_delay": 1,
+    "stream": false,
+    "max_loop": 15
+}

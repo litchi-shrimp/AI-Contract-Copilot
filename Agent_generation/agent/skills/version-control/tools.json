@@ -1,0 +1,21 @@
+[
+  {
+    "name": "rollback",
+    "description": "回退到指定版本的大纲，支持回退到最近版本或指定版本",
+    "parameters": {
+      "version": {
+        "type": "string",
+        "description": "版本标识，可选值：'latest'（最近版本）或具体的时间戳"
+      },
+      "reason": {
+        "type": "string",
+        "description": "回退原因"
+      }
+    }
+  },
+  {
+    "name": "list_backups",
+    "description": "列出所有可用的备份版本",
+    "parameters": {}
+  }
+]

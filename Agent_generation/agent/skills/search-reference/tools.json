@@ -1,0 +1,50 @@
+[
+  {
+    "file": "retrieve_template_reference.py",
+    "name": "retrieve_template_reference",
+    "description": "从模板库中检索与用户需求相关的参考内容，使用关键词检索算法。如果第一次检索未找到相关内容，会尝试使用不同的关键词重新检索（最多重试2次）。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "用户的需求描述或问题"
+        },
+        "top_k": {
+          "type": "integer",
+          "description": "返回的相关结果数量，默认为5，建议5-10条",
+          "default": 5,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "return": {
+      "type": "string",
+      "description": "相关模板内容列表，包含章节编号、标题和条款内容"
+    }
+  },
+  {
+    "file": "web_search.py",
+    "name": "web_search",
+    "description": "当模板检索无法找到相关内容时，使用网络搜索获取参考信息。该工具会提取用户问题中的法律相关关键词进行搜索，并结合当前大纲结构提供建议。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "用户的需求描述或问题"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "return": {
+      "type": "string",
+      "description": "网络搜索结果，包含相关参考信息和当前大纲结构"
+    }
+  }
+]
