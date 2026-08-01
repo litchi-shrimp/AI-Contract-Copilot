@@ -1,4 +1,4 @@
-# Contract Generation — Multi-Agent AI Contract Copilot
+# AI Contract Copilot — Multi-Agent AI Contract Copilot
 
 <p align="center">
   <strong>企业级多智能体协作的 AI 合同生成系统 · 从需求到终稿全流程自动化</strong><br/>
