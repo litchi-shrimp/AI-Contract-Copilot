@@ -21,7 +21,11 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
       - run: npm run build
-      - run: echo "window.__APP_CONFIG__ = { apiBase: '${{ vars.API_BASE }}' }" > dist/config.js
+      - name: Write runtime config
+        env: { API_BASE: "${{ vars.API_BASE }}" }
+        run: |
+          echo "window.__APP_CONFIG__ = { apiBase: '$API_BASE' }" > dist/config.js
+          cat dist/config.js
       - uses: actions/upload-pages-artifact@v3
         with: { path: frontend/dist }
   deploy:
