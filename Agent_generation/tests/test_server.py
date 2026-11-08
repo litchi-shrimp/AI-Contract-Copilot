@@ -147,6 +147,46 @@ def test_full_flow_stop_resume_close(client, _fake):
     assert roles.count("user") == 3
 
 
+def test_idle_waiting_run_evicted_and_resumed(client, _fake):
+    """等待用户输入的会话不占线程；被回收出内存后，用户再发消息从数据库检查点无缝继续"""
+    from server.runs import manager
+    h = auth(client, "evict", "Passw0rd9")
+    cid = client.post("/api/conversations", json={}, headers=h).json()["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "上海个人租赁合同，月租2500，押一付三"}, headers=h)
+    wait_status(client, h, cid, {"waiting_input"})
+    manager.settle_waiting(cid)
+    assert not manager.is_running(cid) and manager.is_waiting(cid), "等待输入时不应保留运行线程"
+    assert manager.active_count() == 0, "等待输入的会话不占并发名额"
+    manager.gc(idle_seconds=0)
+    assert cid not in manager.runs, "闲置会话应被回收出内存"
+    r = client.post(f"/api/conversations/{cid}/messages", json={"text": "确认"}, headers=h)
+    assert r.status_code == 200, r.text
+    d = wait_status(client, h, cid, {"waiting_input"}, timeout=40)
+    assert d["pipeline"]["current_step"] == 8 and 5 in d["pipeline"]["step_done"]
+
+
+def test_many_concurrent_runs(client, _fake):
+    """多个会话同时运行：各自独立推进，名额只在执行期间占用"""
+    from server import runs
+    from server.runs import manager
+    old = runs.settings.max_active_runs_per_user
+    runs.settings.max_active_runs_per_user = 10
+    try:
+        h = auth(client, "multi", "Passw0rd0")
+        cids = [client.post("/api/conversations", json={}, headers=h).json()["id"] for _ in range(6)]
+        for i, cid in enumerate(cids):
+            r = client.post(f"/api/conversations/{cid}/messages", json={"text": f"上海个人租赁合同，月租{2000 + i}"},
+                            headers=h)
+            assert r.status_code == 200, r.text
+        for cid in cids:
+            wait_status(client, h, cid, {"waiting_input"})
+        for cid in cids:
+            manager.settle_waiting(cid)
+        assert manager.active_count() == 0
+    finally:
+        runs.settings.max_active_runs_per_user = old
+
+
 def test_user_isolation(client):
     h1 = auth(client, "carol", "Passw0rd1")
     h2 = auth(client, "dave", "Passw0rd2")
@@ -203,7 +243,7 @@ def test_sse_stream(client):
     assert replay and replay[0]["id"] == last + 1
     types = [e["event_type"] for e in got]
     assert "run.started" in types and "step.start" in types and "run.waiting" in types
-    assert any(t in types for t in ("agent.think.stream", "llm.token"))
+    assert any(t in types for t in ("agent.think.stream", "agent.answer.stream", "llm.token"))
     ids = [e["id"] for e in got]
     assert ids == sorted(ids)
     wait_status(client, h, cid, {"waiting_input"})

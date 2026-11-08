@@ -28,43 +28,87 @@ class StepFailed(Exception):
 
 
 def run_with_timeout(fn: Callable[[], Any], timeout: Optional[float], label: str = "task") -> Any:
-    """在子线程运行 fn，带超时与取消；超时时取消子令牌让 fn 内部尽快退出"""
+    """在当前线程运行 fn，带超时与取消（不再为每次尝试额外创建看门狗线程）。
+
+    超时由共享的定时器触发子取消令牌：fn 内部所有阻塞点（LLM 流、信号量、退避 sleep、工具调用）
+    都监听取消令牌，会立即抛出 RunCancelled；这里再把“子令牌超时”转换为 TimeoutError 交给降级逻辑。
+    会话级取消（用户停止）沿父令牌传播，原样抛出 RunCancelled。
+    """
     ctx = current()
-    if timeout is None and ctx is None:
+    if ctx is None:
         return fn()
-    import threading
-    child = ctx.cancel.child() if ctx is not None else None
-    box = {}
+    child = ctx.cancel.child()
+    timed_out = {"v": False}
 
-    def _target():
-        try:
-            if ctx is not None:
-                with agent_scope(cancel=child):
-                    box["r"] = fn()
-            else:
-                box["r"] = fn()
-        except BaseException as e:  # noqa: BLE001
-            box["e"] = e
+    def _expire():
+        timed_out["v"] = True
+        child.cancel(f"{label} 超时")
 
-    th = threading.Thread(target=bind(_target), daemon=True, name=f"run:{label}")
-    th.start()
-    deadline = time.monotonic() + timeout if timeout else None
-    while th.is_alive():
-        th.join(0.2)
-        if ctx is not None and ctx.cancel.cancelled:
-            th.join(5)
+    handle = _deadlines.schedule(timeout, _expire) if timeout else None
+    try:
+        with agent_scope(cancel=child):
+            return fn()
+    except RunCancelled:
+        if ctx.cancel.cancelled:
             raise RunCancelled(ctx.cancel.reason or "cancelled")
-        if deadline is not None and time.monotonic() > deadline:
-            if child is not None:
-                child.cancel(f"{label} 超时")
-            th.join(10)
+        if timed_out["v"]:
             raise TimeoutError(f"{label} 超过 {timeout}s")
-    if "e" in box:
-        err = box["e"]
-        if isinstance(err, RunCancelled) and ctx is not None and not ctx.cancel.cancelled:
-            raise TimeoutError(f"{label} 超过 {timeout}s")
-        raise err
-    return box.get("r")
+        raise
+    finally:
+        if handle is not None:
+            _deadlines.cancel(handle)
+        child.detach()
+
+
+class _DeadlineScheduler:
+    """所有超时共用一个守护线程（小根堆），替代“每个任务一个 threading.Timer / 看门狗线程”"""
+
+    def __init__(self):
+        import heapq
+        import itertools
+        import threading
+        self._heap, self._heapq, self._seq = [], heapq, itertools.count()
+        self._cancelled = set()
+        self._cv = threading.Condition()
+        self._thread = None
+        self._threading = threading
+
+    def schedule(self, delay: float, cb: Callable[[], None]) -> int:
+        hid = next(self._seq)
+        with self._cv:
+            self._heapq.heappush(self._heap, (time.monotonic() + delay, hid, cb))
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = self._threading.Thread(target=self._run, daemon=True, name="deadlines")
+                self._thread.start()
+            self._cv.notify()
+        return hid
+
+    def cancel(self, hid: int):
+        with self._cv:
+            self._cancelled.add(hid)
+
+    def _run(self):
+        while True:
+            with self._cv:
+                while not self._heap:
+                    self._cv.wait()
+                when, hid, cb = self._heap[0]
+                now = time.monotonic()
+                if hid in self._cancelled:
+                    self._heapq.heappop(self._heap)
+                    self._cancelled.discard(hid)
+                    continue
+                if when > now:
+                    self._cv.wait(when - now)
+                    continue
+                self._heapq.heappop(self._heap)
+            try:
+                cb()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+_deadlines = _DeadlineScheduler()
 
 
 def run_with_fallback(step_name: str, strategies: List[Strategy]) -> Tuple[Any, str]:

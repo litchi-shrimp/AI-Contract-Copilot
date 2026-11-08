@@ -16,8 +16,11 @@ class Settings:
     cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX", r"https://[a-z0-9-]+\.github\.io")
     workspaces_dir = Path(os.getenv("WORKSPACES_DIR", str(ROOT / "workspaces")))
     max_input_chars = int(os.getenv("MAX_INPUT_CHARS", "4000"))
-    max_active_runs_per_user = int(os.getenv("MAX_ACTIVE_RUNS_PER_USER", "2"))
-    max_active_runs_total = int(os.getenv("MAX_ACTIVE_RUNS_TOTAL", "16"))
+    # 只统计“正在执行”的运行（等待用户输入的会话不占名额，也不占线程）
+    max_active_runs_per_user = int(os.getenv("MAX_ACTIVE_RUNS_PER_USER", "3"))
+    max_active_runs_total = int(os.getenv("MAX_ACTIVE_RUNS_TOTAL", "64"))
+    # 等待用户输入超过该时长的会话从内存中回收（检查点在数据库，用户再发消息时自动恢复）
+    run_idle_evict_seconds = float(os.getenv("RUN_IDLE_EVICT_SECONDS", "900"))
     run_max_llm_calls = int(os.getenv("RUN_MAX_LLM_CALLS", "200"))
     run_max_tokens = int(os.getenv("RUN_MAX_TOKENS", "3000000"))
     idle_close_hours = float(os.getenv("IDLE_CLOSE_HOURS", "72"))

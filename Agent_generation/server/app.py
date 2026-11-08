@@ -43,11 +43,18 @@ log = logging.getLogger("server")
 
 # ------------------------------------------------------------ 生命周期
 def _janitor(stop: threading.Event):
-    while not stop.wait(600):
+    """后台回收：每 60s 释放闲置会话的内存（等待输入超时 / 已结束的运行、无人订阅的事件通道）；每 10 分钟关闭过期会话"""
+    tick = 0
+    while not stop.wait(60):
+        tick += 1
         try:
-            n = db.close_idle(settings.idle_close_hours)
-            if n:
-                log.info("closed %s idle conversations", n)
+            r = manager.gc()
+            if r["evicted"] or r["channels_dropped"]:
+                log.info("gc: %s", r)
+            if tick % 10 == 0:
+                n = db.close_idle(settings.idle_close_hours)
+                if n:
+                    log.info("closed %s idle conversations", n)
         except Exception as e:  # noqa: BLE001
             log.warning("janitor error: %s", e)
 
@@ -136,7 +143,7 @@ def _public_conv(conv: dict) -> dict:
 @app.get("/api/health")
 def health():
     from agent.repository import get_template_repository
-    return {"ok": True, "templates": get_template_repository().health(), "time": time.time()}
+    return {"ok": True, "templates": get_template_repository().health(), "runtime": manager.stats(), "time": time.time()}
 
 
 @app.post("/api/auth/register", dependencies=[rate_limit("auth")])
@@ -365,10 +372,8 @@ def send_message(cid: str, body: Message, user=CurrentUser):
     if conv["status"] in ("completed", "closed"):
         raise HTTPException(409, "会话已结束，不再接受输入。请新建任务。")
     state = conv.get("state") or {}
-    running = manager.is_running(cid)
-    run = manager.runs.get(cid)
-    waiting = running and run and run.pipeline and run.pipeline.state.status == "waiting_input"
-    if running and not waiting:
+    manager.settle_waiting(cid)
+    if manager.is_running(cid):
         raise HTTPException(409, "AI 正在处理中，请等待或先点击停止")
     text = sanitize_input(body.text)
     if not text:
@@ -429,30 +434,29 @@ async def events(cid: str, request: Request, user=CurrentUser, last_event_id: Op
     last = int(hdr) if hdr and hdr.isdigit() else last_event_id
     ch = manager.channel(cid)
     sub = ch.subscribe(last)
+    loop = asyncio.get_running_loop()
+    wake = asyncio.Event()
+    # Agent 线程发布事件时线程安全地唤醒本协程：没有新事件时连接完全挂起，不轮询
+    sub.bind(lambda: loop.call_soon_threadsafe(wake.set))
 
     async def gen():
         yield "retry: 3000\n\n"
         try:
-            idle = 0.0
             while True:
-                if await request.is_disconnected():
-                    break
-                batch = []
                 try:
-                    while len(batch) < 200:
-                        batch.append(sub.q.get_nowait())
-                except Exception:
-                    pass
-                if batch:
-                    idle = 0.0
-                    for ev in batch:
-                        yield f"id: {ev['id']}\nevent: message\ndata: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
-                else:
-                    await asyncio.sleep(0.05)
-                    idle += 0.05
-                    if idle >= 15:
-                        idle = 0.0
-                        yield ": ping\n\n"
+                    await asyncio.wait_for(wake.wait(), timeout=15)
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    yield ": ping\n\n"
+                    continue
+                wake.clear()
+                while True:
+                    batch = sub.drain(200)
+                    if not batch:
+                        break
+                    yield "".join(f"id: {ev['id']}\nevent: message\ndata: "
+                                  f"{json.dumps(ev, ensure_ascii=False, default=str)}\n\n" for ev in batch)
         finally:
             ch.unsubscribe(sub)
 

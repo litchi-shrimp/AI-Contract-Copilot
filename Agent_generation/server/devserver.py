@@ -3,6 +3,7 @@
     python -m server.devserver --port 8001
 
 FAKE_DELAY 控制每次 LLM 调用的模拟耗时（秒），便于测试“停止 / 继续”
+检索默认 mock（不消耗博查额度），DEV_REAL_SEARCH=1 时使用真实检索
 """
 import argparse
 import os
@@ -24,8 +25,14 @@ def main():
     os.environ.setdefault("CORS_ORIGINS", "http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:5173")
     os.environ.setdefault("WORKSPACES_DIR", str(ROOT / "workspaces_e2e"))
     from agent.runtime import set_mock_handler
+    from agent.utils import web_search_core
     from fake_llm import FakeLLM
     set_mock_handler(FakeLLM(delay=float(os.getenv("FAKE_DELAY", "0.25"))))
+    if os.getenv("DEV_REAL_SEARCH") != "1":
+        # 默认不调用真实检索（博查 API 有额度）；确需联调真实检索时设置 DEV_REAL_SEARCH=1
+        web_search_core.set_mock_search(lambda q, n: [{"title": "参考范本", "url": "http://example.com/ref",
+                                                       "summary": "合同参考", "content": "第一条 标的 第二条 价款",
+                                                       "ok": True}])
     import uvicorn
     from server.app import app
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")

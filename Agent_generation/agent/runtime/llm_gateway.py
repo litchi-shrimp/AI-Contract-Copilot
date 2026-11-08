@@ -324,7 +324,9 @@ def _do_stream_provider(request: dict, settings: "LLMSettings", provider, ctx, a
 
 
 def _route_token(ctx, agent, step, text, model, tracker, stream_event_map, on_token):
-    _emit(ctx, "llm.token", agent, step, {"text": text, "model": model})
+    # 有字段路由的 Agent（思考 / 回答等）只推送路由后的语义事件，原始 token 不再重复推送一遍
+    if not stream_event_map:
+        _emit(ctx, "llm.token", agent, step, {"text": text, "model": model})
     if tracker is not None and stream_event_map:
         buf: Dict[str, List[str]] = {}
         for key_path, ch in tracker.feed(text):

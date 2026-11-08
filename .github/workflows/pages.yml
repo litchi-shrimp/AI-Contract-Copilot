@@ -4,7 +4,7 @@ name: Deploy frontend to GitHub Pages
 on:
   push:
     branches: [master, main]
-    paths: ["frontend/**", ".github/workflows/pages.yml"]
+    paths: ["frontend/**", "Agent_generation/evals/report.html", ".github/workflows/pages.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,6 +26,8 @@ jobs:
         run: |
           echo "window.__APP_CONFIG__ = { apiBase: '$API_BASE' }" > dist/config.js
           cat dist/config.js
+      - name: Publish evaluation report
+        run: cp ../Agent_generation/evals/report.html dist/report.html
       - uses: actions/upload-pages-artifact@v3
         with: { path: frontend/dist }
   deploy:

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/License-MIT-lightgrey">
 </p>
 
-**[在线体验](https://litchi-shrimp.github.io/AI-Contract-Copilot/)** · [快速开始](#快速开始) · [工作流程](#工作流程) · [评测](#评测) · [工程设计](docs/ENGINEERING.md)
+**[在线体验](https://litchi-shrimp.github.io/AI-Contract-Copilot/)** · [评测报告](https://litchi-shrimp.github.io/AI-Contract-Copilot/report.html) · [快速开始](#快速开始) · [工作流程](#工作流程) · [工程设计](docs/ENGINEERING.md)
 
 <img src="figs/2_generation_process_2.png" width="900" alt="生成过程：左侧对话与 Agent 时间线，右侧合同实时增量修改">
 
@@ -110,7 +110,7 @@ flowchart TB
 | 工具调用 | 非法操作率 0%，批量利用率 85.3%，绕路率 3.2%，编辑落地率 84.7% |
 | Judge 可靠性 | Fleiss κ 0.88，3 次采样全一致 96.8%，证据核验失败 0 |
 
-完整报告（含分维度得分、逐要素定位、盲评理由、迭代对比与审计明细）见 [`Agent_generation/evals/report.html`](Agent_generation/evals/report.html)，为单文件离线页面。
+完整报告（含分维度得分、逐要素定位、盲评理由、迭代对比与审计明细）可[在线查看](https://litchi-shrimp.github.io/AI-Contract-Copilot/report.html)，源文件为 [`Agent_generation/evals/report.html`](Agent_generation/evals/report.html)。
 
 > 被评系统与 Judge 使用同一模型，存在自我偏好风险。证据核验与双向成对比较可以缓解但无法完全消除，详见 [`docs/ENGINEERING.md`](docs/ENGINEERING.md)。
 
@@ -179,6 +179,8 @@ python main.py --resume <run_id>      # 从检查点继续
 | `SECRET_KEY` | 用户 API Key 的加密密钥，丢失后已保存的 Key 无法解密 | 自动生成 |
 | `FREE_RUNS` / `FREE_TOKENS` | 每用户免费完整生成次数 / Token 上限 | `2` / `1800000` |
 | `LLM_ALLOWED_MODELS` | 允许调用的模型白名单 | `deepseek-flash` |
+| `LLM_MAX_CONCURRENCY` | 同一时刻在途的 LLM 请求上限，决定整体吞吐 | `8` |
+| `MAX_ACTIVE_RUNS_PER_USER` / `MAX_ACTIVE_RUNS_TOTAL` | 正在执行的生成任务上限（等待用户回复的会话不计入） | `3` / `64` |
 
 ## 测试与评测
 
@@ -196,7 +198,7 @@ python -m evals.report                    # 生成 evals/report.html
 
 ## 部署
 
-- **后端**：[`deploy/contract-copilot.service`](deploy/contract-copilot.service)（systemd）和 [`deploy/nginx.conf`](deploy/nginx.conf)（已关闭 SSE 缓冲）。运行状态保存在进程内，需以单 worker 运行。
+- **后端**：[`deploy/contract-copilot.service`](deploy/contract-copilot.service)（systemd）和 [`deploy/nginx.conf`](deploy/nginx.conf)（已关闭 SSE 缓冲）。单进程多线程运行：等待用户输入的会话不占线程，闲置会话自动回收出内存，吞吐由 `LLM_MAX_CONCURRENCY` 决定，详见 [`docs/ENGINEERING.md`](docs/ENGINEERING.md)。
 - **前端**：[`.github/workflows/pages.yml`](.github/workflows/pages.yml) 构建并发布到 GitHub Pages，后端地址通过仓库变量 `API_BASE` 注入。
 
 ## 项目结构
@@ -224,7 +226,7 @@ docs/ENGINEERING.md    # 工程设计说明
 
 - 对抗式大纲的审查方只检查遗漏，不检查重复和层级，修复轮次偶尔会引入主题重叠。
 - 个别合同存在交叉引用指向不存在条款、前后条件不一致的问题，评测审计明细中可定位到具体条款。
-- 后端为单进程设计，多实例部署需要引入 Redis 事件总线与分布式锁。
+- 后端为单进程设计（流程以等待 LLM 为主，单进程即可支撑数十个会话同时生成）；横向扩展到多台机器需要引入 Redis 事件总线与分布式锁。
 - Anthropic、OpenAI Responses、Gemini 协议目前只用本地 mock 服务验证过。
 
 ## 免责声明

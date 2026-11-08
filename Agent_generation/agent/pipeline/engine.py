@@ -66,6 +66,7 @@ def _emit(event_type: str, data: dict = None, step: Optional[int] = None, agent:
 class ContractPipeline:
     CHUNK_COUNT = 3
     TOPK = 8
+    LIVE_INTERVAL = 0.8   # 并行起草时实时文档推送的最小间隔（秒）
 
     def __init__(self, state: PipelineState, checkpoint: Optional[Callable[[PipelineState], None]] = None,
                  initial_requirement: Optional[str] = None, auto_confirm: bool = False,
@@ -337,9 +338,17 @@ class ContractPipeline:
         # 实时视图：各 chunk 的当前状态拼成完整合同推送前端（单个 chunk 的局部文档不能直接展示）
         live = [done_chunks.get(str(i)) or chunks[i] for i in range(len(chunks))]
         live_lock = threading.Lock()
+        # 每次工具编辑都推送整份合同会产生大量重复的大对象（N 个 Drafter × 每次编辑 × 全文），
+        # 这里合并为最多每 LIVE_INTERVAL 秒推送一次；最后一次编辑由 parallel.complete 后的 snapshot 兜底
+        throttle = {"last": 0.0, "pending": None}
 
-        def publish_live(tool=None, locators=None):
+        def publish_live(tool=None, locators=None, force=False):
+            now = time.monotonic()
             with live_lock:
+                if not force and now - throttle["last"] < self.LIVE_INTERVAL:
+                    throttle["pending"] = (tool, locators)
+                    return
+                throttle["last"], throttle["pending"] = now, None
                 secs = [s for c in live for s in c["标准化模板文本"]["正文章节"]]
                 tpl = outline["标准化模板文本"]
                 merged = {"标准化模板文本": {"合同首部": tpl.get("合同首部", ""), "正文章节": secs,
@@ -385,6 +394,8 @@ class ContractPipeline:
                 data, used = original, "keep_outline"
             if used != "keep_outline":
                 done_chunks[str(idx)] = data
+            if throttle["pending"] is not None:
+                publish_live(*throttle["pending"], force=True)
             _emit("parallel.agent_complete", {"group": "drafter", "strategy": used}, step=5, agent=name)
             return idx, data, used
 

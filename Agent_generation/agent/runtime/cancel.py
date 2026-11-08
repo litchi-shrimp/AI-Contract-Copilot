@@ -17,8 +17,7 @@ class CancelToken:
         self._reason: Optional[str] = None
         self._callbacks: List[Callable[[], None]] = []
         self._lock = threading.Lock()
-        if parent is not None:
-            parent.add_callback(self._on_parent_cancel)
+        self._unlink = parent.add_callback(self._on_parent_cancel) if parent is not None else None
 
     def _on_parent_cancel(self):
         self._fire(self._parent.reason if self._parent else "cancelled")
@@ -92,3 +91,9 @@ class CancelToken:
 
     def child(self) -> "CancelToken":
         return CancelToken(parent=self)
+
+    def detach(self):
+        """子任务结束后从父令牌摘除回调，避免长会话中父令牌累积成千上万个失效回调（内存泄漏）"""
+        if self._unlink is not None:
+            self._unlink()
+            self._unlink = None
