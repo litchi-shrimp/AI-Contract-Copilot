@@ -26,6 +26,7 @@ class ToolManager:
         self.tools: Dict[str, dict] = {}
         # 缓存已加载的工具实例
         self.tool_instances: Dict[str, Any] = {}
+        self._harness = None
 
         # 1. 先加载 JSON 工具列表
         if tools_json:
@@ -60,9 +61,6 @@ class ToolManager:
             if not os.path.isdir(scripts_dir):
                 continue
 
-            # 添加到导入路径
-            if scripts_dir not in sys.path:
-                sys.path.insert(0, scripts_dir)
 
             # 遍历脚本文件
             for filename in os.listdir(scripts_dir):
@@ -74,32 +72,65 @@ class ToolManager:
                 if tool_name not in self.tools:
                     continue
 
+                if tool_name in self.tool_instances:
+                    continue
                 try:
-                    # 真正导入工具
-                    module = importlib.import_module(tool_name)
+                    # 按文件路径加载（skill 级命名空间），避免不同 skill 同名脚本互相覆盖
+                    import importlib.util
+                    mod_name = f"_skill_{skill_dir_name.replace(chr(45), chr(95))}_{tool_name}"
+                    module = sys.modules.get(mod_name)
+                    if module is None:
+                        spec = importlib.util.spec_from_file_location(mod_name, os.path.join(scripts_dir, filename))
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        sys.modules[mod_name] = module
                     # 查找带 execute 的工具类
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
-                        if isinstance(attr, type) and hasattr(attr, "execute"):
+                        if isinstance(attr, type) and hasattr(attr, "execute") and attr.__name__.endswith("Tool") and (attr.__module__ == module.__name__ or attr.__module__.startswith("agent.")):
                             instance = attr(self.outline_manager)
                             self.tool_instances[tool_name] = instance
-                            print(f"[工具加载] {tool_name}", file=sys.stderr)
                 except Exception as e:
                     print(f"[工具加载失败] {tool_name}: {str(e)}", file=sys.stderr)
 
     def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> str:
-        """执行工具（只执行JSON里有的）"""
+        """执行工具（只执行JSON里有的）—— 底层执行，不含 Harness 校验/事务"""
         if tool_name not in self.tools:
             return f"错误：未在JSON中注册工具 {tool_name}"
 
         tool = self.tool_instances.get(tool_name)
         if not tool:
             return f"错误：找不到工具实现 {tool_name}"
+        if not isinstance(params, dict):
+            return "错误：tool_params 必须是对象"
 
+        import inspect
         try:
+            sig = inspect.signature(tool.execute)
+            accepts_kwargs = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
+            if not accepts_kwargs:
+                unknown = [k for k in params if k not in sig.parameters]
+                if unknown:
+                    return f"错误：工具 {tool_name} 不支持参数 {unknown}，可用参数：{list(sig.parameters)}"
             return tool.execute(**params)
+        except TypeError as e:
+            return f"执行失败：参数错误 {str(e)}"
         except Exception as e:
             return f"执行失败：{str(e)}"
+
+    def run(self, tool_name: str, params: Dict[str, Any], agent_name: str = "unknown") -> str:
+        """经 Harness 执行（白名单 + 参数校验 + 事务回滚 + 审计 + 事件），Agent 应使用该入口"""
+        if self._harness is None:
+            from ..runtime.tool_harness import ToolHarness
+            self._harness = ToolHarness(self, self.outline_manager, agent_name=agent_name)
+        return self._harness.execute(tool_name, params)
+
+    @property
+    def harness(self):
+        if self._harness is None:
+            from ..runtime.tool_harness import ToolHarness
+            self._harness = ToolHarness(self, self.outline_manager)
+        return self._harness
 
     def get_tool_list(self):
         """获取JSON里注册的所有工具"""

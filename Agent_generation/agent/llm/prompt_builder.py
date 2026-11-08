@@ -28,6 +28,10 @@ MASKRULES = """
     - 相同含义 → 相同变量名
     - 不同含义 → 不同变量名
     - 变量名必须语义清晰
+    4. 【例外·最高优先级】用户需求中已明确给出的具体条件（金额、比例、期限、天数、数量、地域、仲裁/管辖机构、
+       支付节点等）属于合同实质条款，必须原样写入对应条款，禁止替换为占位符。
+       例：用户说“月租金2500元、押一付三、违约金2个月租金” → 写“月租金为人民币2500元”，而非“{月租金金额}”。
+       脱敏仅针对：参考模板中的原始信息，以及用户未提供的当事人身份信息/日期/账号等。
     示例：
         张三 → {甲方姓名}
         北京市朝阳区XX路 → {房屋地址}
@@ -216,14 +220,16 @@ class DrafterAgentPrompt:
         else:
             self.searchSkillpath = Path(__file__).parent.parent / "skills" / "search-reference-web" / "SKILL.md"
         self.initial_outline_path = Path(__file__).parent.parent / "data" / "initial_outline.json"
-        self.initial_outline = json.load(open(self.initial_outline_path, "r", encoding="utf-8"))
+        self.initial_outline = None  # 历史遗留字段：未被使用，不再在构造时读盘（避免会话隔离下文件缺失导致崩溃）
         self.user_need = user_need or None
         self.user_need_str = ""
         if self.user_need:
             collected = self.user_need.get("collected", "")
             extra_need = self.user_need.get("extra_need", "")
             summary = self.user_need.get("summary", "")
-            self.user_need_str = f"字段：\n{collected}额外需求：\n{extra_need}摘要：\n{summary}"
+            original = self.user_need.get("original_request", "")
+            self.user_need_str = (f"字段：\n{collected}额外需求：\n{extra_need}摘要：\n{summary}"
+                                  + (f"\n用户原话（具体数值以此为准，必须原样写入对应条款）：\n{original}" if original else ""))
 
     def build_system_prompt(self):
         """构建系统提示词
@@ -279,7 +285,8 @@ class DrafterAgentPrompt:
             2.  你的能力边界：
                 - 可调用指定工具（search工具）检索合同作为上下文参考，辅助扩充大纲内容；
                 - 可基于现有大纲，结合用户需求和检索到的上下文参考，扩充每个条款的具体内容，不改变【当前合同大纲chunk】的章节、条款顺序和标题；
-                - 可识别并MASK合同中的关键敏感信息（如甲方/乙方名称、金额、日期、地址等，用{{XXX}}格式标注，例：{{甲方名称}}、{{合同金额}}）；
+                - 可识别并MASK合同中的关键敏感信息（如甲方/乙方名称、日期、地址等，用{{XXX}}格式标注，例：{{甲方名称}}）；
+            - 【例外·最高优先级】用户需求中已明确给出的金额、比例、期限、天数、数量、地域、仲裁/管辖机构等具体条件，必须原样写入，禁止替换为占位符；若大纲中已被占位符代替，应改回用户给定的具体值；
                 - 可确保扩充内容符合相关法律规定，无法律歧义、无法律错误，贴合合同类型的行业规范。
             3.  核心原则：仅扩充完善细节条款内容、不删【当前合同大纲chunk】结构；参考检索内容但不照搬，贴合用户具体需求；所有扩充内容需具备法律严谨性。
             4.  扩充时，条款之间逻辑需要连贯，不能断层或跳跃。
@@ -305,7 +312,7 @@ class DrafterAgentPrompt:
             1.  大纲结构约束：绝对不允许增加、删除【当前合同大纲chunk】的任何章节、条款，不修改原有条款标题，仅对现有条款的内容进行补充、扩充，细化；
             2.  法律约束：所有扩充内容必须符合《民法典》及对应合同类型的相关法律规定，无法律错误、无歧义，不出现违法违规条款；
             3.  内容约束：禁止编造内容、禁止条款冲突，扩充内容需贴合用户需求，参考合同检索结果但不照搬。
-            4.  脱敏约束：严格执行脱敏规则，如果出现敏感信息，必须替换为规范占位符{{变量名}}，占位符必须**语义明确、全局唯一、不重复、不冲突**
+            4.  脱敏约束：严格执行脱敏规则，如果出现敏感信息，必须替换为规范占位符{{变量名}}，占位符必须**语义明确、全局唯一、不重复、不冲突**；但用户需求中明确给出的具体条件（金额/比例/期限/地域/仲裁机构等）不属于脱敏对象，必须写入具体值
             5.  工具调用约束：仅在无参考依据、不明确扩充内容时调用search工具，不滥用工具；检索关键词需精准（适当扩充），贴合当前条款或合同整体类型；
             6.  循环约束：每一轮仅执行一个阶段，完成当前阶段后，再进入下一轮循环；不跨阶段、不遗漏步骤，确保每一步动作可追溯。此外不断循环审查生成，直到所有条款均完成扩充、检查无误才结束输出final_answer。
             
@@ -396,7 +403,7 @@ class ReviewAgentPrompt:
 
 
         self.initial_contract_path = Path(__file__).parent.parent.parent / "outputs" / "initial_contract.json"
-        self.initial_contract = json.load(open(self.initial_contract_path, "r", encoding="utf-8"))
+        self.initial_contract = None  # 历史遗留字段：未被使用，不再在构造时读盘
         self.schema = {
            "type": "object",
            "properties":{
@@ -580,6 +587,8 @@ class LeaderAgentPrompt:
             3. 优先级规则：P0（高风险/法律合规）> P1（中风险/一致性）> P2（低风险/表述优化）；
             4. 如果无法安全修改，写入 deferred_items，而不是强行给出不可靠修改；
             5. 严格执行脱敏规则，如果出现敏感信息，必须替换为规范占位符占位符，占位符必须语义明确、全局唯一、不重复、不冲突；
+               例外：【用户需求】中明确给出的金额/比例/期限/天数/地域/仲裁机构等具体条件必须写入具体值；
+               若合同中这些条件仍是占位符（如 {{月租金金额}}）或与用户需求不一致，应作为 P0 用 update_clause 改正；
             6. 禁止在 content 内手写任何 locator 编号、章节号、条款号、子项序号等结构化标识；
             7. 所有层级结构、节点拆分全部由系统 locator 体系管理。
 
@@ -633,7 +642,14 @@ class LeaderAgentPrompt:
         """) + json.dumps(self.plan_schema, ensure_ascii=False, indent=2)
 
     def build_plan_user_prompt(self, review_payload: dict):
+        need = getattr(self, "user_need", None) or {}
+        need_text = ""
+        if need:
+            need_text = (f"【用户需求】\n摘要：{need.get('summary', '')}\n字段：{json.dumps(need.get('collected', {}), ensure_ascii=False)}"
+                         f"\n额外需求：{json.dumps(need.get('extra_need', []), ensure_ascii=False)}\n"
+                         f"用户原话（具体数值以此为准）：{need.get('original_request', '')}\n")
         return textwrap.dedent(f"""
+            {need_text}
             【当前合同内容】
             {json.dumps(self.outline_manager.get_outline(), ensure_ascii=False)}
 
@@ -940,6 +956,7 @@ class OutlineGeneratorWithoutTemplatePrompt:
                 - 用户需求元数据：{collected}
                 - 个性化附加需求：{extra_need}
                 - 需求摘要：{summary}
+                - 用户原话（金额/期限/比例/数量等具体数值以此为准，必须写入对应条款）：{self.user_need.get("original_request", "")}
 
             【生成要求】
             1. 充分发挥你的法律专业知识，网络搜索结果仅作维度参考
@@ -1078,6 +1095,7 @@ class AdversarialOutlineAgentPrompt:
             - 使用场景：{collected.get('scene', '')}
             - 特殊需求：{'; '.join(extra_need) if extra_need else '无'}
             - 需求摘要：{summary}
+            - 用户原话（具体数值以此为准）：{self.user_need.get("original_request", "")}
             注意：大纲生成的复杂度需依赖用户需求，复杂程度标准见【合同行业标准定义】
             {COMPLEXITY_STANDARD}
 

@@ -28,6 +28,10 @@ MASKRULES = """
     - 相同含义 → 相同变量名
     - 不同含义 → 不同变量名
     - 变量名必须语义清晰
+    4. 【例外·最高优先级】用户需求中已明确给出的具体条件（金额、比例、期限、天数、数量、地域、仲裁/管辖机构、
+       支付节点等）属于合同实质条款，必须原样写入对应条款，禁止替换为占位符。
+       例：用户说“月租金2500元、押一付三、违约金2个月租金” → 写“月租金为人民币2500元”，而非“{月租金金额}”。
+       脱敏仅针对：参考模板中的原始信息，以及用户未提供的当事人身份信息/日期/账号等。
     示例：
         张三 → {甲方姓名}
         北京市朝阳区XX路 → {房屋地址}
@@ -219,6 +223,7 @@ class OutlineGenerationAgent(BaseAgent):
                 - 用户需求元数据：{collected}
                 - 个性化附加需求：{extra_need}
                 - 需求摘要：{summary}
+                - 用户原话（金额/期限/比例/数量等具体数值以此为准，必须写入对应条款）：{self.user_need.get("original_request", "")}
             【参考合同模板（仅供参考，非强制）当前列表排序顺序就是参考优先级顺序】
                 - {template_info_filter}
             【生成要求】
@@ -236,11 +241,15 @@ class OutlineGenerationAgent(BaseAgent):
         """
         生成初始合同大纲骨架
         """
-        system = self.system_prompt
-        user = self.user_prompt
-        response = self.llm_call(system, user)
-        json_data = self.response_parser.parse_agent_response(response)
-        if json_data and "error" not in json_data:
-            self.current_outline = json_data
-
+        from ..runtime.llm_gateway import call_llm_json
+        from ..utils.outline_schema import validate_outline, normalize_outline
+        self.check_cancelled()
+        json_data = call_llm_json(self.system_prompt, self.user_prompt, self.config.settings,
+                                  validator=validate_outline, repair_attempts=2, agent=self.agent_name,
+                                  step=self._step, stream_event_map=self.STREAM_EVENT_MAP)
+        think = json_data.get("思考", "") if isinstance(json_data, dict) else ""
+        json_data = normalize_outline(json_data)
+        if think:
+            json_data["思考"] = think
+        self.current_outline = json_data
         return json_data

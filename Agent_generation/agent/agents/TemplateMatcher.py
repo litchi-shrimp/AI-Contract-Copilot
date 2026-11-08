@@ -6,6 +6,7 @@ import jieba
 from rank_bm25 import BM25Okapi
 from ..core.base_agent import AGENTS_DIR, AGENT_DIR, BASE_DIR
 from ..llm.async_llm import sync_llm_call_with_events
+from ..repository import get_template_repository
 
 TEMPLATE_LIBRARY_DIR = BASE_DIR.parent / "template_library"
 USER_NEED_SUMMARY_PATH = AGENT_DIR / "data" / "user_need_summary.json"
@@ -52,9 +53,7 @@ def load_user_need():
 
 
 def load_classify_data():
-    classify_path = os.path.join(TEMPLATE_LIBRARY_DIR, "all_classify.json")
-    with open(classify_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return get_template_repository().classify_tree()
 
 
 def get_one_template_metadata(template_data):
@@ -133,37 +132,12 @@ def get_one_template_chapter_details(template_item):
 
 
 def stage1_prefix_recall(template_id: str) -> list:
-    """阶段1：根据 template_id 前缀召回同类所有模板
+    """阶段1：根据 template_id 前缀召回同类所有模板（数据源：TemplateRepository，MySQL/文件自动选择）
 
-    如 "Engineering_EPC" → prefix="Engineering" → glob "Engineering_*.json"
-    如 "Lease" → prefix="Lease" → glob "Lease*.json"
+    如 "Engineering_EPC" → prefix="Engineering" → Engineering_*；"Lease" → Lease / Lease_*
     """
     prefix = template_id.split("_")[0] if "_" in template_id else template_id
-    pattern = os.path.join(TEMPLATE_LIBRARY_DIR, f"{prefix}_*.json")
-    candidate_files = glob.glob(pattern)
-
-    all_candidates = []
-    for file_path in candidate_files:
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                template_data = json.load(f)
-        except Exception:
-            continue
-
-        if isinstance(template_data, dict):
-            if all(key.isdigit() for key in template_data.keys()):
-                for key, value in template_data.items():
-                    if isinstance(value, dict) and "template_name" in value:
-                        value["_file"] = file_path
-                        value["_key"] = key
-                        all_candidates.append(value)
-            elif "template_name" in template_data:
-                template_data["_file"] = file_path
-                template_data["_key"] = "0"
-                all_candidates.append(template_data)
-
-    return all_candidates
-
+    return get_template_repository().list_by_prefix(prefix)
 
 RANK_STREAM_EVENT_MAP = {
     ("reason",): "agent.think.stream",
@@ -224,15 +198,34 @@ def stage2_llm_rank(user_need: dict, candidates: list, topK: int, event_bus=None
             temperature=0.3,
         )
         print(f"[LLM排名] 原始响应: {response}", flush=True)
-        match = re.search(r'\{[^{}]*"indices"\s*:\s*\[[^\]]*\][^{}]*\}', response, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group())
-            indices = parsed.get("indices", [])
-            return [candidates[i] for i in indices if 0 <= i < len(candidates)]
+        picked = _parse_indices(response, len(candidates), actual_topK)
+        if picked:
+            return [candidates[i] for i in picked]
     except Exception as e:
+        if type(e).__name__ == "RunCancelled":
+            raise
         print(f"[LLM排名] 失败，降级为 BM25: {e}", flush=True)
 
     return stage2_bm25_rank(user_need, candidates, topK)
+
+
+def _parse_indices(response: str, n: int, top_k: int) -> list:
+    """解析 LLM 精排输出 → 去重、越界过滤、截断到 top_k"""
+    from ..utils.response_parser import ResponseParser
+    parsed = ResponseParser.parse_agent_response(response or "")
+    raw = parsed.get("indices") if isinstance(parsed, dict) else None
+    if not isinstance(raw, list):
+        m = re.search(r'"indices"\s*:\s*\[([^\]]*)\]', response or "")
+        raw = re.findall(r'\d+', m.group(1)) if m else []
+    out = []
+    for x in raw:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < n and i not in out:
+            out.append(i)
+    return out[:top_k]
 
 
 def stage2_bm25_rank(user_need: dict, candidates: list, topK: int) -> list:
@@ -286,35 +279,12 @@ ELSE_RANK_SYSTEM_PROMPT = """你是一个合同模板检索专家。当前用户
 
 
 def load_all_templates() -> list:
-    """加载模板库中全部模板
-
-    Returns:
-        所有模板字典的列表
-    """
-    all_templates = []
-    if not TEMPLATE_LIBRARY_DIR.exists():
-        return all_templates
-    for file_path in TEMPLATE_LIBRARY_DIR.glob("*.json"):
-        if file_path.name == "all_classify.json":
-            continue
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            continue
-        if isinstance(data, dict):
-            if all(key.isdigit() for key in data.keys()):
-                for key, value in data.items():
-                    if isinstance(value, dict) and "template_name" in value:
-                        value["_file"] = str(file_path)
-                        value["_key"] = key
-                        all_templates.append(value)
-            elif "template_name" in data:
-                data["_file"] = str(file_path)
-                data["_key"] = "0"
-                all_templates.append(data)
-    return all_templates
-
+    """加载模板库中全部模板（TemplateRepository）"""
+    try:
+        return get_template_repository().list_all()
+    except Exception as e:  # noqa: BLE001
+        print(f"[模板库] 加载失败：{e}", flush=True)
+        return []
 
 def stage1_bm25_coarse(user_need: dict, candidates: list, topN: int = 30) -> list:
     """BM25 全库粗筛：用用户 summary + scene 对模板 abstract 打分，取 Top-N"""
@@ -394,13 +364,13 @@ def stage2_else_llm_rank(user_need: dict, candidates: list, topK: int, event_bus
             stream_event_map=RANK_STREAM_EVENT_MAP,
             temperature=0.3,
         )
-        match = re.search(r'\{[^{}]*"indices"\s*:\s*\[[^\]]*\][^{}]*\}', response, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group())
-            indices = parsed.get("indices", [])
-            return [candidates[i] for i in indices if 0 <= i < len(candidates)]
+        picked = _parse_indices(response, len(candidates), actual_topK)
+        if picked:
+            return [candidates[i] for i in picked]
     except Exception as e:
-        print(f"[ELSE-LLM排名] 失败，降级为 BM25: {e}", flush=True)
+        if type(e).__name__ == "RunCancelled":
+            raise
+        print(f"[ELSE-LLM排名] 失败，降级为原 BM25 顺序: {e}", flush=True)
 
     return candidates[:actual_topK]
 
@@ -427,11 +397,15 @@ def match_templates(topK: int = 3, user_need: dict = None, event_bus=None):
         print(f"未找到合同类型 '{contract_type}' 对应的 ID → 全库兜底")
         return _full_library_fallback(user_need, topK, event_bus=event_bus)
 
-    candidates = stage1_prefix_recall(template_id)
+    try:
+        candidates = stage1_prefix_recall(template_id)
+    except Exception as e:  # noqa: BLE001  模板库访问失败 → 视为未命中，走零模板对抗生成（降级）
+        print(f"[模板召回] 失败，按未命中处理：{e}", flush=True)
+        candidates = []
     if not candidates:
+        # 已命中分类但该分类下无模板：按设计返回空，由 Step3 走零模板对抗式大纲生成
+        print(f"前缀召回无结果: {template_id} → 零模板生成")
         return []
-        print(f"前缀召回无结果: {template_id} → 全库兜底")
-        return _full_library_fallback(user_need, topK, event_bus=event_bus)
 
     if len(candidates) <= 1:
         return [build_result_item(candidates[0])] if candidates else []

@@ -1,0 +1,38 @@
+[
+  {
+    "label": "v1（初版 · v4-pro/flash 混合）",
+    "note": "脱敏规则误伤用户已给定条件；WebSearch 检索词缺陷；5 个用例（fund_custody 评测时崩溃）",
+    "element_accuracy": 0.9214285714285715,
+    "clause_recall": 1.0,
+    "rubric_system": 0.921095238095238,
+    "outline_system": 0.7477272727272727,
+    "rubric_baseline": 0.9537142857142857
+  },
+  {
+    "label": "v2（修复后 · e2e-v1.2 · v4-pro/flash 混合）",
+    "note": "修复脱敏误伤 / 检索词 / extra_need 空值；6 个用例",
+    "element_accuracy": 0.986111111111111,
+    "clause_recall": 1.0,
+    "rubric_system": 0.9278594771241829,
+    "outline_system": 0.9067234848484849,
+    "rubric_baseline": 0.9323809523809524
+  },
+  {
+    "label": "v3（e2e-v1.3 · 全部 deepseek-flash）",
+    "note": "Rubric 校准 + 统一模型；审计发现摘要改写丢失用户数值（设备采购单价/总价未写入）",
+    "element_accuracy": 0.9583333333333334,
+    "clause_recall": 1.0,
+    "rubric_system": 0.9869281045751633,
+    "outline_system": 0.928125,
+    "rubric_baseline": 0.9921568627450981
+  },
+  {
+    "label": "v4（当前 · e2e-v1.3 · 全部 deepseek-flash）",
+    "note": "修复摘要丢失用户数值（原话注入）；要素检测正则修正（交货期）",
+    "element_accuracy": 1.0,
+    "clause_recall": 1.0,
+    "rubric_system": 0.9798249299719887,
+    "outline_system": 0.9416666666666665,
+    "rubric_baseline": 0.9921568627450981
+  }
+]

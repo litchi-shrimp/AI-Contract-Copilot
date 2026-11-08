@@ -19,26 +19,26 @@ from datetime import datetime, timedelta
 from openai import APITimeoutError, APIConnectionError, RateLimitError, InternalServerError, AuthenticationError, BadRequestError
 
 # ==================== 全局统一 LLM 配置 ====================
-API_KEY = os.getenv("baiLianKey")
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+API_KEY = os.getenv("DeepSeekKey") or os.getenv("DEEPSEEK_API_KEY")
+BASE_URL = "https://api.deepseek.com"
 if not API_KEY:
-    raise ValueError("环境变量 'baiLianKey' 未设置")
+    raise ValueError("环境变量 'DeepSeekKey' / 'DEEPSEEK_API_KEY' 未设置")
 
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-MODEL_ID = "deepseek-v4-flash"
+MODEL_ID = "deepseek-flash"
 TEMPERATURE = 0.2
 TIMEOUT = 5000
 STREAM: bool = False
 MAX_RETRIES = 1
 RETRY_DELAY_SECONDS = 10  # 每次重试之间等待3秒
 
-def llm_call(system_prompt: str, user_prompt: str, stream: bool = False, temperature: float = TEMPERATURE, max_retries: int = MAX_RETRIES, base_delay: int = 1, timeout: int = TIMEOUT, model_id: str = MODEL_ID, fallback_model_id: str = "deepseek-v4-flash", base_url: str = BASE_URL) -> str:
+def llm_call(system_prompt: str, user_prompt: str, stream: bool = False, temperature: float = TEMPERATURE, max_retries: int = MAX_RETRIES, base_delay: int = 1, timeout: int = TIMEOUT, model_id: str = MODEL_ID, fallback_model_id: str = "deepseek-flash", base_url: str = BASE_URL) -> str:
     current_model = model_id
     current_timeout = timeout
 
     for attempt in range(1, max_retries + 1):
         try:
-            api_key = os.getenv("baiLianKey")
+            api_key = API_KEY
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=current_timeout)
             messages = [
                 {"role": "system", "content": system_prompt},

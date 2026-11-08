@@ -1,0 +1,33 @@
+# 前端部署到 GitHub Pages（仅静态文件；后端部署在云服务器）
+# 仓库 Settings → Pages → Source 选择 GitHub Actions；Settings → Variables 添加 API_BASE（如 https://api.example.com）
+name: Deploy frontend to GitHub Pages
+on:
+  push:
+    branches: [master, main]
+    paths: ["frontend/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run build
+      - run: echo "window.__APP_CONFIG__ = { apiBase: '${{ vars.API_BASE }}' }" > dist/config.js
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: frontend/dist }
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4

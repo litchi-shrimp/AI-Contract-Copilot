@@ -98,6 +98,14 @@ class InsertClauseTool:
            - child 操作：保持原始顺序（append 追加，无索引冲突）。
         3. section 级 after 操作若参考节点不存在，自动降级追加到末尾。"""
         results = []
+        # 先按“操作前”的 locator 解析出参考节点对象：后续插入会重编号，但节点对象不变，
+        # 执行时读取其最新 locator，保证批量操作都以调用时的合同版本为准（语义稳定）
+        for op in ops:
+            op["ref"] = self.outline_manager.find_node(op["locator"])
+
+        def _loc(op):
+            ref = op.get("ref")
+            return ref.get("locator", op["locator"]) if ref else op["locator"]
 
         # 计算每个操作的有效深度
         depth_groups = defaultdict(list)
@@ -122,7 +130,7 @@ class InsertClauseTool:
                     x["seq"]
                 ))
                 for op in pending:
-                    result = self._insert_clause(op["locator"], op["content"], op["position"])
+                    result = self._insert_clause(_loc(op), op["content"], op["position"])
                     results.append(result)
             else:
                 pending = sorted(sibling_ops, key=lambda x: (
@@ -131,110 +139,38 @@ class InsertClauseTool:
                     x["seq"]
                 ))
                 for op in pending:
-                    result = self._insert_clause(op["locator"], op["content"], op["position"])
+                    result = self._insert_clause(_loc(op), op["content"], op["position"])
                     results.append(result)
 
             # child：保持原始顺序（append 追加，无索引冲突）
             child_ops.sort(key=lambda x: x["seq"])
             for op in child_ops:
-                result = self._insert_clause(op["locator"], op["content"], op["position"])
+                result = self._insert_clause(_loc(op), op["content"], op["position"])
                 results.append(result)
 
         return "\n".join(results)
 
     def _insert_at(self, parent, insert_idx, content, parts, node_type, position) -> str:
-        """在预解析的父列表和索引处插入节点，并重编号后续节点
-        
-        Args:
-            parent: 父列表引用
-            insert_idx: 插入位置索引
-            content: 新节点内容
-            parts: 参考节点的 locator tuple
-            node_type: 节点类型
-            position: 插入位置
-        Returns:
-            操作结果
-        """
+        """在父列表的 insert_idx 处插入新节点，然后统一重编号（兼容 chunk 全局 locator）"""
         try:
-            if node_type == 'section':
-                new_section = {
-                    '章节编号': f"第{cn2an.an2cn(insert_idx + 1)}条",
-                    '章节标题': content,
-                    'locator': str(insert_idx + 1),
-                    '条款列表': []
-                }
-                parent.insert(insert_idx, new_section)
-                for i in range(insert_idx + 1, len(parent)):
-                    parent[i]['章节编号'] = f"第{i + 1}条"
-                    parent[i]['locator'] = str(i + 1)
-                    for j, clause in enumerate(parent[i]['条款列表']):
-                        clause['条款编号'] = f"{i + 1}.{j + 1}"
-                        clause['locator'] = f"{i + 1}.{j + 1}"
-                        for k, sub_clause in enumerate(clause.get('子条款列表', [])):
-                            sub_clause['子条款编号'] = f"{i + 1}.{j + 1}.{k + 1}"
-                            sub_clause['locator'] = f"{i + 1}.{j + 1}.{k + 1}"
-                            for l, sub_sub_clause in enumerate(sub_clause.get('子子条款列表', [])):
-                                sub_sub_clause['子子条款编号'] = f"{i + 1}.{j + 1}.{k + 1}.{l + 1}"
-                                sub_sub_clause['locator'] = f"{i + 1}.{j + 1}.{k + 1}.{l + 1}"
-
-            elif node_type == 'clause':
-                section_idx = parts[0]
-                new_clause = {
-                    '条款编号': f"{section_idx}.{insert_idx + 1}",
-                    '条款大致说明': content,
-                    'locator': f"{section_idx}.{insert_idx + 1}",
-                    '子条款列表': []
-                }
-                parent.insert(insert_idx, new_clause)
-                for i in range(insert_idx + 1, len(parent)):
-                    parent[i]['条款编号'] = f"{section_idx}.{i + 1}"
-                    parent[i]['locator'] = f"{section_idx}.{i + 1}"
-                    for j, sub_clause in enumerate(parent[i].get('子条款列表', [])):
-                        sub_clause['子条款编号'] = f"{section_idx}.{i + 1}.{j + 1}"
-                        sub_clause['locator'] = f"{section_idx}.{i + 1}.{j + 1}"
-                        for k, sub_sub_clause in enumerate(sub_clause.get('子子条款列表', [])):
-                            sub_sub_clause['子子条款编号'] = f"{section_idx}.{i + 1}.{j + 1}.{k + 1}"
-                            sub_sub_clause['locator'] = f"{section_idx}.{i + 1}.{j + 1}.{k + 1}"
-
-            elif node_type == 'sub_clause':
-                section_idx, clause_idx = parts[0], parts[1]
-                new_sub_clause = {
-                    '子条款编号': f"{section_idx}.{clause_idx}.{insert_idx + 1}",
-                    '子条款大致说明': content,
-                    'locator': f"{section_idx}.{clause_idx}.{insert_idx + 1}",
-                    '子子条款列表': []
-                }
-                parent.insert(insert_idx, new_sub_clause)
-                for i in range(insert_idx + 1, len(parent)):
-                    parent[i]['子条款编号'] = f"{section_idx}.{clause_idx}.{i + 1}"
-                    parent[i]['locator'] = f"{section_idx}.{clause_idx}.{i + 1}"
-                    for j, sub_sub_clause in enumerate(parent[i].get('子子条款列表', [])):
-                        sub_sub_clause['子子条款编号'] = f"{section_idx}.{clause_idx}.{i + 1}.{j + 1}"
-                        sub_sub_clause['locator'] = f"{section_idx}.{clause_idx}.{i + 1}.{j + 1}"
-
-            elif node_type == 'sub_sub_clause':
-                section_idx, clause_idx, sub_clause_idx = parts[0], parts[1], parts[2]
-                new_sub_sub_clause = {
-                    '子子条款编号': f"{section_idx}.{clause_idx}.{sub_clause_idx}.{insert_idx + 1}",
-                    '子子条款大致说明': content,
-                    'locator': f"{section_idx}.{clause_idx}.{sub_clause_idx}.{insert_idx + 1}"
-                }
-                parent.insert(insert_idx, new_sub_sub_clause)
-                for i in range(insert_idx + 1, len(parent)):
-                    parent[i]['子子条款编号'] = f"{section_idx}.{clause_idx}.{sub_clause_idx}.{i + 1}"
-                    parent[i]['locator'] = f"{section_idx}.{clause_idx}.{sub_clause_idx}.{i + 1}"
-
-            else:
+            templates = {
+                'section': lambda: {'章节编号': '', '章节标题': content, 'locator': '', '条款列表': []},
+                'clause': lambda: {'条款编号': '', '条款大致说明': content, 'locator': '', '子条款列表': []},
+                'sub_clause': lambda: {'子条款编号': '', '子条款大致说明': content, 'locator': '', '子子条款列表': []},
+                'sub_sub_clause': lambda: {'子子条款编号': '', '子子条款大致说明': content, 'locator': ''},
+            }
+            if node_type not in templates:
                 return f"无法处理节点类型: {node_type}"
-
-            locator_str = ".".join(str(p) for p in parts)
-            self.outline_manager.log_operation('add_clause', locator=locator_str,
+            node = templates[node_type]()
+            parent.insert(insert_idx, node)
+            self.outline_manager.renumber()
+            new_loc = node.get('locator', '')
+            ref_loc = ".".join(str(p) for p in parts)
+            self.outline_manager.log_operation('add_clause', locator=ref_loc, new_locator=new_loc,
                                                 content=content, position=position)
-            return f"成功在 {locator_str} {position} 位置插入新条款"
-
+            return f"成功在 {ref_loc} {position} 位置插入新条款（新节点 locator={new_loc}）"
         except Exception as e:
             return f"插入节点失败: {str(e)}"
-
     def _insert_clause(self, locator: str, content: str, position: str) -> str:
         """执行单个条款插入（保持原有逻辑）
 
@@ -261,6 +197,7 @@ class InsertClauseTool:
                     '条款列表': []
                 }
                 sections.append(new_section)
+                self.outline_manager.renumber()
                 self.outline_manager.log_operation('add_clause', locator=locator,
                                                     content=content, position=position)
                 return f"成功在 {locator} after 位置插入新条款"
@@ -309,6 +246,7 @@ class InsertClauseTool:
                                      tuple(parts), node_type, position)
             return result
 
+        self.outline_manager.renumber()
         self.outline_manager.log_operation('add_clause', locator=locator,
                                             content=content, position=position)
         return f"成功在 {locator} {position} 位置插入新条款"

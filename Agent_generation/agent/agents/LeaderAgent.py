@@ -4,6 +4,7 @@ LeaderAgent：聚合审查结果并执行合同修订（Plan-Execute）
 """
 import json
 import re
+import sys
 from typing import Dict, Any, List, Tuple
 from pathlib import Path
 
@@ -23,7 +24,7 @@ class LeaderAgent(BaseAgent):
     }
 
     def __init__(self, agent_name: str, contract_name: str = "initial_contract.json",
-                 contract_data: dict = None, reviews: dict = None):
+                 contract_data: dict = None, reviews: dict = None, user_need: dict = None):
         """初始化LeaderAgent
         
         Args:
@@ -34,16 +35,19 @@ class LeaderAgent(BaseAgent):
         """
         super().__init__(agent_name, BASE_DIR / "configs" / "config_leader.json")
         
-        self.contract_path = BASE_DIR / "outputs" / contract_name
-        self.match_result_path = AGENT_DIR / "data" / "match_result.json"
+        from ..runtime import paths as _paths
+        self.paths_outputs = _paths.outputs_dir()
+        self.paths_memory = _paths.memory_dir()
+        self.contract_path = self.paths_outputs / contract_name
+        self.match_result_path = _paths.data_dir() / "match_result.json"
         self.tool_list_path = AGENTS_DIR / "leader_agent_tools.json"
 
         # 审查结果文件路径映射（文件模式兜底）
         self.review_paths = {
-            "ReviewCompletenessAgent": BASE_DIR / "outputs" / "ReviewCompletenessAgent.json",
-            "ReviewConsistencyAgent": BASE_DIR / "outputs" / "ReviewConsistencyAgent.json",
-            "ReviewLegalAgent": BASE_DIR / "outputs" / "ReviewLegalAgent.json",
-            "ReviewUsageAgent": BASE_DIR / "outputs" / "ReviewUsageAgent.json",
+            "ReviewCompletenessAgent": self.paths_outputs / "ReviewCompletenessAgent.json",
+            "ReviewConsistencyAgent": self.paths_outputs / "ReviewConsistencyAgent.json",
+            "ReviewLegalAgent": self.paths_outputs / "ReviewLegalAgent.json",
+            "ReviewUsageAgent": self.paths_outputs / "ReviewUsageAgent.json",
         }
 
         # 内存模式：存储外部传入的审查结果
@@ -56,10 +60,13 @@ class LeaderAgent(BaseAgent):
         else:
             self.outline_manager = OutlineManager(self.contract_path, self.match_result_path)
         self.prompt_builder = LeaderAgentPrompt(self.outline_manager, self.tools)
+        self.prompt_builder.user_need = user_need
         self.tool_manager = ToolManager(self.outline_manager, tools_json=self.tools)
+        self.harness = self.tool_manager.harness
+        self.harness.agent_name = agent_name
 
-        self.plan_output_path = BASE_DIR / "outputs" / "LeaderPlan.json"
-        self.report_output_path = BASE_DIR / "outputs" / "LeaderExecutionReport.json"
+        self.plan_output_path = self.paths_outputs / "LeaderPlan.json"
+        self.report_output_path = self.paths_outputs / "LeaderExecutionReport.json"
 
     def _safe_load_json(self, path: Path) -> Dict[str, Any]:
         """安全加载JSON文件，处理文件不存在或解析错误的情况
@@ -128,27 +135,34 @@ class LeaderAgent(BaseAgent):
         return locators
 
     def _generate_plan(self, review_payload: Dict[str, Any]) -> Dict[str, Any]:
-        """生成修订计划
-        
-        Args:
-            review_payload: 审查结果
-            
-        Returns:
-            修订计划
-        """
-        # 构建系统提示词和用户提示词
+        """生成修订计划（结构化输出 + 校验 + 自修复）"""
+        from ..runtime.llm_gateway import call_llm_json
+        allowed = {t.get("name") for t in self.tools}
+
+        def _validate(plan):
+            if not isinstance(plan, dict) or not isinstance(plan.get("decisions", None), list):
+                return "必须包含 decisions 数组"
+            for i, d in enumerate(plan["decisions"]):
+                if not isinstance(d, dict):
+                    return f"decisions[{i}] 必须是对象"
+                if d.get("tool_name") not in allowed:
+                    return f"decisions[{i}].tool_name={d.get('tool_name')} 不在可用工具 {sorted(allowed)} 中"
+                if not isinstance(d.get("tool_params"), dict) or not d.get("tool_params"):
+                    return f"decisions[{i}].tool_params 必须是非空对象"
+            return None
+
         system_prompt = self.prompt_builder.build_plan_system_prompt()
         user_prompt = self.prompt_builder.build_plan_user_prompt(review_payload)
-        # 添加用户输入到历史记录
         self.history_manager.add_user_input(user_prompt)
-        # 调用LLM生成计划
-        response = self.llm_call(system_prompt, str(self.history_manager.get_history()))
-        # 解析LLM响应
-        parsed = self.response_parser.parse_agent_response(response)
-        # 添加Agent响应到历史记录
-        self.history_manager.add_agent_response(response)
+        try:
+            parsed = call_llm_json(system_prompt, str(self.history_manager.get_history()), self.config.settings,
+                                   validator=_validate, repair_attempts=2, agent=self.agent_name,
+                                   step=self._step, stream_event_map=self.STREAM_EVENT_MAP)
+        except Exception as e:  # noqa: BLE001  计划失败 → 降级为“不修订”，由上层留痕
+            return {"error": f"{type(e).__name__}: {e}"}
+        parsed.setdefault("deferred_items", [])
+        self.history_manager.add_agent_response(json.dumps(parsed, ensure_ascii=False)[:6000])
         return parsed
-
     def _locator_sort_key(self, tool_params: Dict[str, Any]) -> tuple:
         """从 insert_clause 的参数中提取 locator 并转为可排序的元组
         
@@ -161,12 +175,12 @@ class LeaderAgent(BaseAgent):
         if locators:
             max_parts = []
             for l in locators:
-                parts = [int(x) for x in l.split(".")]
+                parts = [int(x) if x.isdigit() else 0 for x in str(l).split(".")]
                 max_parts.append(parts)
             max_parts.sort()
             return tuple(max_parts[-1]) if max_parts else (0,)
         if locator:
-            return tuple(int(x) for x in locator.split("."))
+            return tuple(int(x) if x.isdigit() else 0 for x in str(locator).split("."))
         return (0,)
 
     def _execute_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,11 +231,13 @@ class LeaderAgent(BaseAgent):
                 })
                 continue
 
-            # 执行工具
-            result = self.tool_manager.execute_tool(tool_name, tool_params)
+            # 经 Harness 执行（白名单 / 参数校验 / 事务回滚 / 审计）
+            self.check_cancelled()
+            result = self.harness.execute(tool_name, tool_params)
+            rec = self.harness.records[-1] if self.harness.records else None
 
             # 检查执行结果
-            if result.startswith("错误") or result.startswith("执行失败") or "未找到定位标识" in result:
+            if rec is not None and rec.status in ("rejected", "error", "timeout"):
                 report["failed_actions"].append({
                     "decision_id": decision_id,
                     "tool_name": tool_name,
@@ -245,63 +261,48 @@ class LeaderAgent(BaseAgent):
         return report
 
     def _save_json(self, path: Path, data: Dict[str, Any]):
-        """保存JSON数据到文件
-        
-        Args:
-            path: 文件路径
-            data: 要保存的数据
-        """
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        from ..runtime.paths import atomic_write_json
+        try:
+            atomic_write_json(path, data)
+        except Exception as e:  # 报告落盘失败不影响主流程
+            print(f"[LeaderAgent] 写入 {path} 失败：{e}", file=sys.stderr)
 
     def run(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """运行LeaderAgent，执行完整的修订流程
-        
+        """运行 LeaderAgent：汇总审查 → 生成计划 → 执行计划
+
         Returns:
-            执行报告
+            (执行报告, 修订后的合同)。任何分支都返回二元组；计划失败时合同保持不变（降级）。
         """
-        # 加载所有审查结果
         all_reviews = self._load_all_reviews()
-        # 统计总问题数
-        total_problems = sum(len(v.get("problems", [])) for v in all_reviews.values())
+        total_problems = sum(len(v.get("problems", []) or []) for v in all_reviews.values() if isinstance(v, dict))
 
-        # 如果没有问题，直接返回
         if total_problems == 0:
-            result = {
-                "leader_agent_name": self.agent_name,
-                "message": "未检测到可处理的问题，合同保持不变。",
-                "total_review_problems": 0
-            }
+            result = {"leader_agent_name": self.agent_name, "message": "未检测到可处理的问题，合同保持不变。",
+                      "total_review_problems": 0, "executed_actions": [], "failed_actions": [],
+                      "deferred_items": []}
             self._save_json(self.report_output_path, result)
-            return result
+            return result, self.outline_manager.get_outline()
 
-        # 生成修订计划
         plan = self._generate_plan(all_reviews)
-        # 检查计划生成是否失败
         if "error" in plan:
-            fail_result = {
-                "leader_agent_name": self.agent_name,
-                "message": "计划生成失败",
-                "error": plan["error"]
-            }
+            fail_result = {"leader_agent_name": self.agent_name, "message": "计划生成失败，合同保持不变（降级）",
+                           "error": plan["error"], "degraded": True, "executed_actions": [],
+                           "failed_actions": [], "deferred_items": []}
             self._save_json(self.report_output_path, fail_result)
-            return fail_result
+            return fail_result, self.outline_manager.get_outline()
 
-        # 保存Plan
         self._save_json(self.plan_output_path, plan)
-        # 执行Plan
         report = self._execute_plan(plan)
-        # 所有操作完成后，统一保存一次合同
+        report["plan"] = plan
+        report["tool_records"] = self.harness.export()
         self.outline_manager.save_outline()
-        # 保存执行报告
         self._save_json(self.report_output_path, report)
         contract_data = self.outline_manager.get_outline()
-        # 最后将合同原文（非结构文本）保存到文件
-        modified_text = self.outline_manager._format_outline()
-        with open(BASE_DIR / "outputs" / "modified_contract_text_review_after.txt", "w", encoding="utf-8") as f:
-            f.write(modified_text)
-
-        # 最后将所有memory保存到文件
-        self.history_manager.save_history(AGENT_DIR / "memory" / (f"{self.agent_name}.json"))
-        return (report, contract_data)
-
+        try:
+            from ..runtime.paths import atomic_write_text
+            atomic_write_text(self.paths_outputs / "modified_contract_text_review_after.txt",
+                              self.outline_manager._format_outline())
+        except Exception:
+            pass
+        self.history_manager.save_history(self.paths_memory / f"{self.agent_name}.json")
+        return report, contract_data

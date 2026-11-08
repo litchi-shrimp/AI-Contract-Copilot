@@ -105,6 +105,10 @@ class KeyPathTracker:
         if ch == ']':
             return
 
+        # 结构间空白（如 ": " 后的空格、换行缩进）不属于任何值
+        if ch.isspace():
+            return
+
         # 非字符串值（true/false/null/数字）
         if self.after_colon:
             key_path = tuple(self.stack)

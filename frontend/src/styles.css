@@ -1,0 +1,75 @@
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --side: #f3f4f7;
+  --ink: #1f2329;
+  --ink-2: #4e5969;
+  --muted: #86909c;
+  --line: #e5e6eb;
+  --line-2: #eef0f3;
+  --brand: #4f46e5;
+  --brand-2: #6366f1;
+  --brand-soft: #eef2ff;
+  --ok: #00b42a;
+  --ok-soft: #e8ffea;
+  --warn: #ff7d00;
+  --warn-soft: #fff7e8;
+  --err: #f53f3f;
+  --err-soft: #ffece8;
+  --add-bg: #e8f7ee;
+  --add-ink: #0f7a3a;
+  --del-bg: #fdecec;
+  --del-ink: #b42318;
+  --mod-bg: #fff6e0;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .04);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --doc-font: "Songti SC", "SimSun", "宋体", "Noto Serif SC", serif;
+}
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { font: 14px/1.6 var(--font); color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+input, textarea { font: inherit; color: inherit; }
+a { color: var(--brand); }
+:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 2px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: #fff; color: var(--ink); transition: background .15s, border-color .15s, box-shadow .15s; }
+.btn:hover:not(:disabled) { background: #f7f8fa; border-color: #d6d8de; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: #4338ca; }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover:not(:disabled) { background: rgba(0, 0, 0, .05); }
+.btn.danger { color: var(--err); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; border-radius: 8px; }
+.icon-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  border: 0; background: transparent; color: var(--ink-2); }
+.icon-btn:hover { background: rgba(0, 0, 0, .06); color: var(--ink); }
+svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; background: var(--line-2); color: var(--ink-2); }
+.chip.ok { background: var(--ok-soft); color: #0e7a2a; }
+.chip.warn { background: var(--warn-soft); color: #b25000; }
+.chip.err { background: var(--err-soft); color: var(--err); }
+.chip.brand { background: var(--brand-soft); color: var(--brand); }
+
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 50% { opacity: 0; } }
+.caret::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--brand); margin-left: 1px; }
+
+.toast-wrap { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: #1f2329; color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow); }
+.toast.err { background: var(--err); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d9dbe0; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #c4c7ce; background-clip: padding-box; border: 2px solid transparent; }
+
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing * { transition: none !important; }
+body.resizing iframe, body.resizing .page { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

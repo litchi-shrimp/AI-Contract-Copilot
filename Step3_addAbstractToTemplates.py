@@ -11,14 +11,14 @@ from openai import OpenAI, APITimeoutError, APIConnectionError, RateLimitError, 
 from ExtraFunctions import render_contract_to_plain_text
 
 # 配置OpenAI API
-API_KEY = os.getenv("baiLianKey")
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+API_KEY = os.getenv("DeepSeekKey") or os.getenv("DEEPSEEK_API_KEY")
+BASE_URL = "https://api.deepseek.com"
 if not API_KEY:
-    raise ValueError("环境变量 'baiLianKey' 未设置")
+    raise ValueError("环境变量 'DeepSeekKey' / 'DEEPSEEK_API_KEY' 未设置")
 
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-MODEL_ID = "deepseek-v3.2"
-FALLBACK_MODEL_ID = "deepseek-v4-flash"
+MODEL_ID = "deepseek-flash"
+FALLBACK_MODEL_ID = "deepseek-flash"
 TEMPERATURE = 0.2
 TIMEOUT = 1200
 STREAM: bool = False

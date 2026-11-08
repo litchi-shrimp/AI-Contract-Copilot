@@ -51,17 +51,24 @@ def _resolve_version_conflict(part_name: str, original: str, versions: Dict[str,
         {versions_text}
         请输出 JSON：{{"best_version": 选中的版本号（整数）, "reason": "简要选择原因（30字以内）"}}
 """
-    response = llm_call(system_prompt, user_prompt)
     try:
-        result = json.loads(response)
+        response = llm_call(system_prompt, user_prompt, agent="ChunkMerger", json_mode=True)
+    except Exception as e:  # noqa: BLE001  裁决失败 → 降级为第一个修改版本
+        if type(e).__name__ == "RunCancelled":
+            raise
+        print(f"[合并] LLM 裁决失败（{e}），采用第一个修改版本")
+        return unique_versions[0]
+    try:
+        from .response_parser import ResponseParser
+        result = ResponseParser.parse_agent_response(response)
         version_idx = result.get("best_version", 1)
         if 1 <= version_idx <= len(unique_versions):
             print(f"[合并] LLM 裁决结果：选中版本{version_idx}，原因：{result.get('reason', '')}")
             return unique_versions[version_idx - 1]
-    except (json.JSONDecodeError, TypeError):
-        print(f"[合并] LLM 裁决解析失败，使用原始版本")
-
-    return original
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    print(f"[合并] LLM 裁决解析失败，采用第一个修改版本")
+    return unique_versions[0]
 
 
 def split_contract_chunks(input_json: Path = None, output_dir : Path = CURRENT_DIR.parent / "data", chunk_count: int = 3, data: Dict = None):
@@ -155,7 +162,7 @@ def split_contract_chunks(input_json: Path = None, output_dir : Path = CURRENT_D
 
 def merge_contract_chunks(input_json: Path = None, chunk_files: List[str] = None,
                           chunk_dicts: List[Dict] = None, original_outline: Dict = None,
-                          output_json: Path = CURRENT_DIR.parent.parent/ "outputs" / "initial_contract.json"):
+                          output_json: Path = None):
     if original_outline is not None:
         original = original_outline
     else:
@@ -227,23 +234,19 @@ def merge_contract_chunks(input_json: Path = None, chunk_files: List[str] = None
             "思考": think
         }
     }
+    # chunk 内可能插入/删除了章节 → 全局 locator 可能重复或断号，合并后统一重编号
+    _om = OutlineManager(data=final_data)
+    _om.section_offset = 0
+    _om.renumber()
 
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(final_data, f, ensure_ascii=False, indent=2)
-
-
-    #  这里将合并后的结构化合同，转为人类可读非结构的合同文本，并保存再outputs目录下
-    CURRENT_FILE = Path(__file__).resolve()
-    AGENTS_DIR = CURRENT_FILE.parent  # agent/utils
-    AGENT_DIR = AGENTS_DIR.parent  # agent/
-    BASE_DIR = AGENT_DIR.parent  # 项目根目录
-    outline_path = BASE_DIR / "outputs" / "initial_contract.json"
-    match_result_path = AGENT_DIR / "data" / "match_result.json"
-    outline_manager = OutlineManager(outline_path, match_result_path)
-    modified_text = outline_manager._format_outline()
-    # 保存
-    with open(BASE_DIR / "outputs" / "modified_contract_text_review_before.txt", "w", encoding="utf-8") as f:
-        f.write(modified_text)
-
+    from ..runtime.paths import atomic_write_json, atomic_write_text, outputs_dir
+    if output_json is None:
+        output_json = outputs_dir() / "initial_contract.json"
+    try:
+        atomic_write_json(output_json, final_data)
+        merged_manager = OutlineManager(data=json.loads(json.dumps(final_data, ensure_ascii=False)))
+        atomic_write_text(outputs_dir() / "modified_contract_text_review_before.txt", merged_manager._format_outline())
+    except Exception as e:  # noqa: BLE001  落盘失败不影响内存结果
+        print(f"[合并] 写入输出文件失败：{e}")
     print(f"\n✅ 合并完成！输出文件：{output_json}")
     return final_data

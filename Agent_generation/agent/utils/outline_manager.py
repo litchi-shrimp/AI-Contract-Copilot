@@ -38,6 +38,12 @@ class OutlineManager:
             self.outline = self._load_outline()
             if self._locators_were_added:
                 self._save_outline()
+        # chunk 模式下首个章节的全局起始偏移（如第 2 块从第 5 章开始 → offset=4），重编号时保留
+        try:
+            first = self.outline["标准化模板文本"]["正文章节"][0].get("locator", "1")
+            self.section_offset = max(0, int(str(first).split(".")[0]) - 1)
+        except Exception:
+            self.section_offset = 0
 
         if match_data is not None:
             self.match_result = match_data
@@ -136,32 +142,15 @@ class OutlineManager:
         注意：内存模式下 outline_path 可能为无效路径（如 Path('.')），此时跳过保存。
         调用方应通过 workflow 或 API 自行保存数据。
         """
-        import time
         if not self.outline_path or self.outline_path == Path("."):
+            self._build_locator_index(self.outline)
             return
-        temp_path = self.outline_path.with_suffix(".tmp")
+        from ..runtime.paths import atomic_write_json
         try:
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(self.outline, f, ensure_ascii=False, indent=2)
-            # Windows 上多线程并发时 os.replace 可能被锁，重试 3 次后降级为直接写入
-            for attempt in range(3):
-                try:
-                    os.replace(temp_path, self.outline_path)
-                    break
-                except OSError:
-                    if attempt < 2:
-                        time.sleep(0.1 * (attempt + 1))
-                        continue
-                    # 降级：直接覆盖写入原始文件
-                    with open(self.outline_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.outline, f, ensure_ascii=False, indent=2)
-        except Exception:
-            if temp_path.exists():
-                temp_path.unlink()
-            raise
-        else:
-            if temp_path.exists():
-                temp_path.unlink()
+            atomic_write_json(self.outline_path, self.outline)
+        except Exception as e:  # 落盘失败不影响内存中的合同状态（会话检查点由上层持久化）
+            import sys
+            print(f"[OutlineManager] 保存失败 {self.outline_path}: {e}", file=sys.stderr)
         # 保存后同步更新 locator 索引
         self._build_locator_index(self.outline)
 
@@ -206,36 +195,37 @@ class OutlineManager:
         return None
 
     def _find_parent_and_index(self, locator: str) -> tuple:
-        """查找节点的父节点和索引
+        """查找节点的父列表和在父列表中的索引
 
-        Args:
-            locator: 节点定位标识
+        按 locator 值匹配，而不是按“第几个”定位：chunk 并行起草时，每个 chunk 只包含部分章节，
+        但保留全局 locator（如第 2 块从 "5" 开始），按位置索引会越界/错位。
+        节点不存在时，若是在“末尾之后”的位置（索引 = 父列表长度），返回该索引用于追加。
 
         Returns:
-            (父节点, 节点索引, 节点类型)
+            (父列表, 节点索引, 节点类型)；找不到时返回 (None, None, None)
         """
-        parts = list(map(int, locator.split('.')))
-
+        try:
+            parts = [int(p) for p in str(locator).strip().split('.')]
+        except ValueError:
+            return None, None, None
+        types = {1: 'section', 2: 'clause', 3: 'sub_clause', 4: 'sub_sub_clause'}
+        if len(parts) not in types:
+            return None, None, None
+        sections = self.outline['标准化模板文本']['正文章节']
         if len(parts) == 1:
-            # 章节，父节点是正文章节列表
-            return self.outline['标准化模板文本']['正文章节'], parts[0] - 1, 'section'
-        elif len(parts) == 2:
-            # 条款，父节点是章节的条款列表
-            section = self.outline['标准化模板文本']['正文章节'][parts[0] - 1]
-            return section['条款列表'], parts[1] - 1, 'clause'
-        elif len(parts) == 3:
-            # 子条款，父节点是条款的子条款列表
-            section = self.outline['标准化模板文本']['正文章节'][parts[0] - 1]
-            clause = section['条款列表'][parts[1] - 1]
-            return clause.get('子条款列表', []), parts[2] - 1, 'sub_clause'
-        elif len(parts) == 4:
-            # 子子条款，父节点是子条款的子子条款列表
-            section = self.outline['标准化模板文本']['正文章节'][parts[0] - 1]
-            clause = section['条款列表'][parts[1] - 1]
-            sub_clause = clause.get('子条款列表', [])[parts[2] - 1]
-            return sub_clause.get('子子条款列表', []), parts[3] - 1, 'sub_sub_clause'
+            parent = sections
+        else:
+            parent_loc = ".".join(str(p) for p in parts[:-1])
+            parent_node = self._find_node_by_locator(parent_loc)
+            if parent_node is None:
+                return None, None, None
+            child_key = {2: '条款列表', 3: '子条款列表', 4: '子子条款列表'}[len(parts)]
+            parent = parent_node.setdefault(child_key, [])
+        target = ".".join(str(p) for p in parts)
+        for idx, node in enumerate(parent):
+            if str(node.get('locator', '')).strip() == target:
+                return parent, idx, types[len(parts)]
         return None, None, None
-
     def get_outline(self) -> Dict[str, Any]:
         """获取大纲数据
 
@@ -503,8 +493,9 @@ class OutlineManager:
         # 处理标准化模板文本
         if '标准化模板文本' in outline:
             standard_template = outline['标准化模板文本']
+            from .outline_schema import as_text
             if "合同首部" in standard_template:
-                result.append(standard_template["合同首部"])
+                result.append(as_text(standard_template["合同首部"]))
             # 处理正文章节
             if '正文章节' in standard_template:
                 for section in standard_template['正文章节']:
@@ -537,10 +528,82 @@ class OutlineManager:
                                             sub_sub_clause_locator = sub_sub_clause.get('locator', '')
                                             result.append(f"      {sub_sub_clause_num} {sub_sub_clause_desc}{f' (locator: {sub_sub_clause_locator})' if show_locator else ''}")
             if "合同尾部" in standard_template:
-                result.append(standard_template["合同尾部"])
-        return '\n'.join(result)
+                result.append(as_text(standard_template["合同尾部"]))
+        return '\n'.join(str(x) for x in result)
     
 
+    # ==================== 统一重编号（保证 locator 与编号始终一致） ====================
+
+    @staticmethod
+    def _section_number(n: int, sample: str) -> str:
+        """按原有风格生成章节编号：第一条/第一章/第1条/1"""
+        import re as _re
+        m = _re.match(r'^第(.+?)([条章节部分]+)$', str(sample or '').strip())
+        if m:
+            suffix = m.group(2)
+            if _re.match(r'^\d+$', m.group(1)):
+                return f"第{n}{suffix}"
+            try:
+                import cn2an
+                return f"第{cn2an.an2cn(n)}{suffix}"
+            except Exception:
+                return f"第{n}{suffix}"
+        if str(sample or '').strip().isdigit():
+            return str(n)
+        try:
+            import cn2an
+            return f"第{cn2an.an2cn(n)}条"
+        except Exception:
+            return f"第{n}条"
+
+    def renumber(self) -> None:
+        """按当前列表顺序重写所有 locator 与编号（保留 chunk 的全局起始偏移）"""
+        sections = self.outline.get('标准化模板文本', {}).get('正文章节', [])
+        offset = getattr(self, 'section_offset', 0)
+        sample = sections[0].get('章节编号', '') if sections else ''
+        for i, section in enumerate(sections):
+            s = i + 1 + offset
+            section['locator'] = str(s)
+            section['章节编号'] = self._section_number(s, section.get('章节编号') or sample)
+            for j, clause in enumerate(section.setdefault('条款列表', [])):
+                loc = f"{s}.{j + 1}"
+                clause['locator'] = loc
+                clause['条款编号'] = loc
+                for k, sub in enumerate(clause.get('子条款列表', []) or []):
+                    loc3 = f"{loc}.{k + 1}"
+                    sub['locator'] = loc3
+                    sub['子条款编号'] = loc3
+                    for m, subsub in enumerate(sub.get('子子条款列表', []) or []):
+                        loc4 = f"{loc3}.{m + 1}"
+                        subsub['locator'] = loc4
+                        subsub['子子条款编号'] = loc4
+        self._build_locator_index(self.outline)
+
+    def validate_structure(self) -> list:
+        """结构不变量检查，返回问题列表（空列表表示合法）"""
+        problems = []
+        tpl = self.outline.get('标准化模板文本')
+        if not isinstance(tpl, dict):
+            return ["缺少 标准化模板文本"]
+        for key in ('合同首部', '正文章节', '合同尾部'):
+            if key not in tpl:
+                problems.append(f"缺少 {key}")
+        seen = set()
+        for loc in self._iter_locators():
+            if loc in seen:
+                problems.append(f"locator 重复：{loc}")
+            seen.add(loc)
+        return problems
+
+    def _iter_locators(self):
+        for section in self.outline.get('标准化模板文本', {}).get('正文章节', []):
+            yield section.get('locator')
+            for clause in section.get('条款列表', []) or []:
+                yield clause.get('locator')
+                for sub in clause.get('子条款列表', []) or []:
+                    yield sub.get('locator')
+                    for subsub in sub.get('子子条款列表', []) or []:
+                        yield subsub.get('locator')
     def snapshot(self):
         """返回可恢复的状态（深拷贝当前内部数据）"""
         import copy
@@ -549,8 +612,12 @@ class OutlineManager:
         })
     
     def restore(self, snapshot):
-        """从快照恢复"""
-        self.outline = snapshot['outline']
+        """从快照恢复（原地替换内容，保证外部持有的 outline 引用仍然有效）"""
+        import copy
+        data = copy.deepcopy(snapshot['outline'])
+        self.outline.clear()
+        self.outline.update(data)
+        self._build_locator_index(self.outline)
     
 if __name__ == "__main__":
     # 测试OutlineManager

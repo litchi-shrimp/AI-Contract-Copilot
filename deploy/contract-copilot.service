@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Contract Copilot API
+After=network.target mysql.service
+
+[Service]
+WorkingDirectory=/opt/contract-copilot/Agent_generation
+EnvironmentFile=/opt/contract-copilot/deploy/backend.env
+ExecStart=/opt/contract-copilot/.venv/bin/uvicorn server.app:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 20
+Restart=always
+RestartSec=3
+User=copilot
+
+[Install]
+WantedBy=multi-user.target

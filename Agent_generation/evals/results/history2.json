@@ -1,0 +1,38 @@
+[
+  {
+    "label": "v1（初版）",
+    "note": "脱敏规则误伤用户已给定条件；WebSearch 检索词缺陷",
+    "element_accuracy": 0.893,
+    "clause_recall": 0.951,
+    "rubric_system": 0.874,
+    "outline_system": 0.786,
+    "rubric_baseline": 0.832
+  },
+  {
+    "label": "v2（修复脱敏 / 检索词 / 空值）",
+    "note": "用户已给定条件不再脱敏；检索源降级链 + 主题校验；extra_need 规范化",
+    "element_accuracy": 0.944,
+    "clause_recall": 0.983,
+    "rubric_system": 0.917,
+    "outline_system": 0.861,
+    "rubric_baseline": 0.832
+  },
+  {
+    "label": "v3（Rubric 校准 e2e-v1.3）",
+    "note": "区分“缺失”与“待填（占位符）”；统一 deepseek-flash",
+    "element_accuracy": 0.972,
+    "clause_recall": 1.0,
+    "rubric_system": 0.958,
+    "outline_system": 0.912,
+    "rubric_baseline": 0.832
+  },
+  {
+    "label": "v4（当前）",
+    "note": "用户原话注入大纲/起草/修订，修复摘要丢失数值",
+    "element_accuracy": 1.0,
+    "clause_recall": 1.0,
+    "rubric_system": 0.9798249299719887,
+    "outline_system": 0.9416666666666665,
+    "rubric_baseline": 0.815032679738562
+  }
+]

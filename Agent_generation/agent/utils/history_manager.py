@@ -8,9 +8,10 @@ from typing import List, Dict
 import json
 
 class HistoryManager:
-    def __init__(self):
-        """初始化历史管理器"""
+    def __init__(self, max_items: int = 60):
+        """初始化历史管理器（max_items：超过后自动压缩历史，防止上下文爆炸）"""
         self.history = []
+        self.max_items = max_items
     
     def add_user_input(self, user_input: str):
         """添加用户输入
@@ -90,6 +91,11 @@ class HistoryManager:
         Returns:
             历史记录列表
         """
+        if len(self.history) > self.max_items:
+            head = self.history[:1]
+            tail = self.history[-(self.max_items - 2):]
+            dropped = len(self.history) - len(head) - len(tail)
+            self.history = head + [{"role": "user", "content": f"（为控制上下文长度，已省略中间 {dropped} 条历史记录）"}] + tail
         return self.history
     
     def clear(self):
@@ -110,5 +116,9 @@ class HistoryManager:
         Args:
             path: 文件路径
         """
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.history, f, ensure_ascii=False, indent=2)
+        try:
+            from ..runtime.paths import atomic_write_json
+            atomic_write_json(path, self.history)
+        except Exception as e:  # 记忆落盘是辅助功能，失败不影响主流程
+            import sys
+            print(f"[HistoryManager] 保存历史失败 {path}: {e}", file=sys.stderr)

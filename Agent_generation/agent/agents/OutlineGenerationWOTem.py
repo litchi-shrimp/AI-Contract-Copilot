@@ -1,5 +1,6 @@
 import textwrap
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -10,6 +11,29 @@ from ..llm.prompt_builder import (
     OutlineGeneratorWithoutTemplatePrompt,
     AdversarialOutlineAgentPrompt,
 )
+
+
+def build_contract_query(user_need: dict) -> str:
+    """构造合同范本检索词：分类叶子名（去掉分类路径/括注）+ 场景，补“范本 条款”；
+    合同类型缺失/为 ELSE 时，从需求摘要中抽取“XX合同/协议”作为主题"""
+    import re as _re
+    collected = (user_need or {}).get("collected", {}) or {}
+    ctype = str(collected.get("contract_type") or "").strip()
+    leaf = _re.sub(r"[（(].*?[）)]", "", ctype.split(".")[-1]).strip()
+    if not leaf or leaf in ("ELSE", "None", "未指定"):
+        text = str((user_need or {}).get("summary") or "") + " " + " ".join(str(x) for x in ((user_need or {}).get("extra_need") or []) if x)
+        cands = _re.findall(r"([\u4e00-\u9fa5及与和]{2,16}?(?:合同|协议))", text)
+        cleaned = []
+        for c in cands:
+            # 取最后一个“一份/签订/需要/为”等引导词之后的部分
+            c = _re.split(r"(?:一份|一个|签订|签署|起草|需要|关于|本合同为|本协议为|为|的)", c)[-1]
+            if len(c) >= 4 and c not in ("合同", "协议"):
+                cleaned.append(c)
+        leaf = cleaned[0] if cleaned else "合同"
+    if not leaf.endswith(("合同", "协议")):
+        leaf += "合同"
+    # 实测：搜索引擎对“XX合同范本”这类紧凑检索词召回最好；附加场景/空格词会被截断为首词导致噪声
+    return f"{leaf}范本"
 
 
 class OutlineGeneratorWithoutTemplate(BaseAgent):
@@ -25,32 +49,38 @@ class OutlineGeneratorWithoutTemplate(BaseAgent):
         self.web_search_results = None
         self.current_outline = {}
 
-    def _initial_llm_call(self, system_prompt: str, user_prompt: str) -> str:
+    def _initial_llm_call(self, system_prompt: str, user_prompt: str) -> dict:
+        """ModelA 初始生成：结构化输出 + 大纲结构校验 + 自修复"""
         from ..agents.config import AgentConfig
+        from ..runtime.llm_gateway import call_llm_json
+        from ..utils.outline_schema import validate_outline
         cfg = AgentConfig(BASE_DIR / "configs" / "config_outline_adversarial_initial.json")
-        return cfg.llm_call(system_prompt, user_prompt)
+        return call_llm_json(system_prompt, user_prompt, cfg.settings, validator=validate_outline,
+                             repair_attempts=2, agent="AdversarialOutlineAgent")
 
     def _web_search(self) -> str:
         """WebSearch(Query:xxx合同) → Top8 搜索结果，返回格式化的上下文文本"""
 
-        # Step 1: 加载 WebSearch 工具
-        import importlib.util
-        web_search_path = AGENT_DIR / "skills" / "search-reference" / "scripts" / "web_search.py"
-        spec = importlib.util.spec_from_file_location("web_search", web_search_path)
-        ws_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ws_module)
-        WebSearchTool = ws_module.WebSearchTool
+        # Step 1: 加载 WebSearch 工具（超时/重试/熔断见 web_search_core）
+        from ..utils.web_search_core import WebSearchTool
 
         # Step 2: 获取用户需求中的合同类型，并拼接设计Web查询Query
-        collected = self.user_need.get("collected", {})
-        contract_type = collected.get("contract_type", "合同")
-        query = f"{contract_type}合同"
+        query = build_contract_query(self.user_need)
 
         # Step 3: 启动 WebSearch 工具，获取 Top8 搜索结果
         tool = WebSearchTool()
-        results = tool.get_search_results(query, num_results=8)
+        try:
+            results = tool.get_search_results(query, num_results=8)
+        except Exception as e:  # noqa: BLE001  搜索失败 → 降级为纯 LLM 知识生成
+            print(f"[ModelA] WebSearch 失败，降级为模型自身知识：{e}", file=sys.stderr)
+            results = []
+        results = [r for r in results if r.get("ok", True)]
+        self.web_search_trace = {"query": query, "results": [{"title": r.get("title"), "url": r.get("url"),
+                                                              "summary": (r.get("summary") or "")[:300]}
+                                                             for r in results]}
         if not results:
-            return "网络搜索结果为空"
+            self.web_search_results = []
+            return "（网络搜索不可用或无结果，请完全依据你的法律专业知识生成）"
         self.web_search_results = results
         # Step 4: 格式化 WebSearch 的输出结果（用于后续prompt拼接）
         formatted_parts = []
@@ -72,10 +102,9 @@ class OutlineGeneratorWithoutTemplate(BaseAgent):
         system_prompt = prompt_builder.build_system_prompt()
         user_prompt = prompt_builder.build_user_prompt()
         # 调用LLM生成初始大纲骨架
-        response = self._initial_llm_call(system_prompt, user_prompt)
-        json_data = self.response_parser.parse_agent_response(response)
-        if json_data and "error" not in json_data:
-            self.current_outline = json_data
+        from ..utils.outline_schema import normalize_outline
+        json_data = normalize_outline(self._initial_llm_call(system_prompt, user_prompt))
+        self.current_outline = json_data
         # 返回初始大纲JSON（注意：后续还要经过对刚Agent润色）
         return json_data
 
@@ -356,10 +385,10 @@ def extract_json_from_response(text: str) -> str:
 class AdversarialOutlineAgent(BaseAgent):
     """对抗式大纲生成 Agent（双模型对抗 + 双层循环）
 
-    Round 0: ModelA1 (deepseek-v3.2, T=0.3) → WebSearch → 生成初始大纲
+    Round 0: ModelA1 (deepseek-flash, T=0.3) → WebSearch → 生成初始大纲
     Round 1-N: 对抗循环
-        ModelB (deepseek-v3.2, T=0.8) 审查完整性（不输出JSON）
-        ModelA2 (deepseek-v4-flash, T=0.3) 针对审查输出调用工具方案（快速）
+        ModelB (deepseek-flash, T=0.8) 审查完整性（不输出JSON）
+        ModelA2 (deepseek-flash, T=0.3) 针对审查输出调用工具方案（快速）
         若"完备" → 结束
         若有遗漏 → ModelA2 ReAct 内循环（insert_clause / update_clause / update_header_footer）
         修复完成后进入下一轮外循环 ModelB 再审查
@@ -391,14 +420,15 @@ class AdversarialOutlineAgent(BaseAgent):
         from ..agents.config import AgentConfig
 
         cfg = AgentConfig(BASE_DIR / "configs" / "config_outline_adversarial.json")
-        return cfg.llm_call(system_prompt, user_prompt)
+        return cfg.llm_call(system_prompt, user_prompt, agent="ModelB_Reviewer", step=self._step)
 
     def _react_llm_call(self, system_prompt: str, user_prompt: str) -> str:
         """ModelA ReAct 内循环专用 LLM 调用"""
         from ..agents.config import AgentConfig
 
         cfg = AgentConfig(BASE_DIR / "configs" / "config_outline_adversarial_react.json")
-        return cfg.llm_call(system_prompt, user_prompt)
+        return cfg.llm_call(system_prompt, user_prompt, agent=self.agent_name, step=self._step,
+                            stream_event_map=self.STREAM_EVENT_MAP)
 
     def _build_react_system_prompt(self) -> str:
         prompt_builder = AdversarialOutlineAgentPrompt(self.user_need, self.tools)
@@ -469,98 +499,105 @@ class AdversarialOutlineAgent(BaseAgent):
         review = self._reviewer_llm_call(review_system_prompt, review_user_prompt)
         review = review.strip()
 
-        is_complete = review == "完备"
+        is_complete = review.strip().strip("。.！!\"'") == "完备" or (len(review) <= 12 and "完备" in review and "不" not in review)
         return (is_complete, review)
 
     def generate(self) -> dict:
-        """主入口：ModelA 初始生成 → 对抗循环 → 返回最终大纲"""
-        # 先初次根据 WebSearch 结果生成大纲
+        """主入口：ModelA 初始生成 → 对抗循环 → 返回最终大纲
+
+        鲁棒性：
+        - ModelA 初始生成失败 → 抛出（由编排层兜底：改用通用骨架模板）
+        - ModelB 审查失败 → 视为本轮无法审查，提前结束对抗，保留当前大纲（降级）
+        - ModelA 修复：工具经 Harness 校验/回滚；连续 JSON 失败或重复失败调用熔断退出内循环
+        - 每轮记录 trace（漏洞数、工具调用、是否收敛），供大纲阶段评测使用
+        """
+        from ..runtime.paths import atomic_write_text, data_dir
+        self.check_cancelled()
         print("[对抗Agent] Round 0: ModelA 初始生成大纲 + WebSearch...", file=sys.stderr)
         generator = OutlineGeneratorWithoutTemplate("ModelA_Generator", self.user_need)
         outline = generator.generate_outline()
+        self.trace = {"web_search": getattr(generator, "web_search_trace", None), "rounds": [],
+                      "initial_outline": json.loads(json.dumps(outline, ensure_ascii=False))}
 
-        # 开始进行ModelA/B对抗
         self.outline_manager = OutlineManager(data=outline)
-        # 注册工具（insert_clause / update_clause / update_header_footer），注入 outline_manager
         self.tool_manager = ToolManager(self.outline_manager, tools_json=self.tools)
+        self.harness = self.tool_manager.harness
+        self.harness.agent_name = self.agent_name
         system_prompt = self._build_react_system_prompt()
+        self.converged = False
 
-        # === 外循环：ModelB 审查 → ModelA 修复 → 再审查 ===
         for loop in range(1, self.config.max_loop + 1):
+            self.check_cancelled()
             self._anti_round = loop
-            print(f"[对抗Agent] Round {loop}: ModelB 审查中...", file=sys.stderr)
-            self.history_manager.del_typeall_history("adversarial_review") # 这里删除审查记录，是为了避免重复提已修复项干扰ModelB的审查
-            # 执行ModelB审查
-            is_complete, review = self._review_outline()
-            if not is_complete:
-                self.review_history.append(review)
-
+            round_info = {"round": loop, "review": "", "issues": 0, "tool_calls": 0, "tool_ok": 0}
+            self.history_manager.del_typeall_history("adversarial_review")
+            try:
+                is_complete, review = self._review_outline()
+            except Exception as e:  # noqa: BLE001
+                round_info["review_error"] = f"{type(e).__name__}: {e}"[:300]
+                self.trace["rounds"].append(round_info)
+                print(f"[对抗Agent] Round {loop}: ModelB 审查失败，保留当前大纲提前结束：{e}", file=sys.stderr)
+                break
+            round_info["review"] = review[:3000]
+            round_info["issues"] = 0 if is_complete else max(1, len(re.findall(r"漏洞[:：]", review)))
             if is_complete:
+                self.converged = True
+                self.trace["rounds"].append(round_info)
                 print(f"[对抗Agent] Round {loop}: ModelB 判定「完备」，对抗结束", file=sys.stderr)
                 break
+            self.review_history.append(review)
+            self.emit("agent.think.stream", {"text": f"\n[第{loop}轮审查] 发现 {round_info['issues']} 处漏洞，开始修复…\n"})
 
-            print(f"[对抗Agent] Round {loop}: 发现漏洞 -\n{review}", file=sys.stderr)
-            self.history_manager.add_user_input("【当前合同大纲】"+self.outline_manager._format_outline(show_locator=True))
+            self.history_manager.add_user_input("【当前合同大纲】" + self.outline_manager._format_outline(show_locator=True))
             self.history_manager.add_adversarial_review(review)
-            # === 内循环：ModelA 连续调用工具修复，直到 completed=True ===
+            parse_errors = 0
+            before_calls = len(self.harness.records)
             for a_round in range(1, self.config.inner_max_loop + 1):
+                self.check_cancelled()
                 response = self._react_llm_call(system_prompt, str(self.history_manager.get_history()))
                 parsed = self.response_parser.parse_agent_response(response)
-                self.history_manager.del_typeall_history("contract")  # 删除上一轮中observation中的合同信息
-                if "error" in parsed:
-                    self.history_manager.add_agent_response(response)
+                self.history_manager.del_typeall_history("contract")
+                if "error" in parsed and len(parsed) == 1:
+                    parse_errors += 1
+                    if parse_errors >= 3:
+                        break
+                    self.history_manager.add_agent_response(response[:1500])
                     self.history_manager.add_user_input("输出格式错误，请返回合法JSON")
                     continue
-
+                parse_errors = 0
                 think = parsed.get("think", "")
                 act = parsed.get("act")
-                param = parsed.get("parameter", {})
-                completed = parsed.get("completed", False)
-
-                print(f"\n{'=' * 50}", file=sys.stderr)
-                print(f"【对抗思考】{think}", file=sys.stderr)
+                param = parsed.get("parameter", {}) or {}
+                completed = bool(parsed.get("completed", False))
                 self.history_manager.add_agent_response(think)
 
                 if act == "final_answer":
-                    answer_text = param.get("answer_text", "")
-                    print(f"【对抗完成】{answer_text}", file=sys.stderr)
-                    self.history_manager.add_agent_response(answer_text)
+                    self.history_manager.add_agent_response(param.get("answer_text", ""))
                     break
-
                 elif act == "use_tool":
-                    tool_name = param.get("tool_name")
-                    tool_params = param.get("tool_params", {})
-                    print(
-                        f"【调用工具】use_tool(tool_name=\"{tool_name}\", tool_params={json.dumps(tool_params, ensure_ascii=False)})",
-                        file=sys.stderr
-                    )
-                    # 示例：use_tool(tool_name="insert_clause", tool_params={"locator": ["1"], "content": ["违约责任"], "position": "child"})
-                    result = self.tool_manager.execute_tool(tool_name, tool_params)
-                    print(f"【工具结果】{result}", file=sys.stderr)
+                    result = self.harness.execute(param.get("tool_name"), param.get("tool_params", {}) or {})
                     self.history_manager.add_tool_observation(f"工具执行结果：{result}")
-                    # 这里添加更新后的大纲放在observation中，让ModelA的ReAct机制确认是否成功修改，会动态清理记忆
                     self.history_manager.add_contract_info(
-                        f"【更新后，当前合同大纲】：\n{self.outline_manager._format_outline(show_locator=True)}"
-                    )
-                    print(f"{'=' * 50}\n", file=sys.stderr)
+                        f"【更新后，当前合同大纲】：\n{self.outline_manager._format_outline(show_locator=True)}")
                 else:
-                    print(f"【未知动作】{act}", file=sys.stderr)
-
+                    self.history_manager.add_user_input(f"未知动作 {act}，act 只能是 use_tool / final_answer")
                 if completed:
                     break
-
-            # 清理记忆，下一轮外循环从干净上下文开始
+            new_recs = self.harness.records[before_calls:]
+            round_info["tool_calls"] = len(new_recs)
+            round_info["tool_ok"] = sum(1 for r in new_recs if r.status in ("ok", "partial"))
+            self.trace["rounds"].append(round_info)
             self.history_manager.del_typeall_history("contract")
             self.history_manager.del_typeall_history("user")
 
-        # 此时已经全部修复漏洞，保存大纲并退出即可。
+        self.trace["converged"] = self.converged
+        self.trace["tool_records"] = self.harness.export()
         self.outline_manager.save_outline()
-        initial_contract_text = self.outline_manager._format_outline()
-        with open(AGENT_DIR / "data" / "initial_contract_text.txt", "w", encoding="utf-8") as f:
-            f.write(initial_contract_text)
-
+        try:
+            atomic_write_text(data_dir() / "initial_contract_text.txt", self.outline_manager._format_outline())
+        except Exception:
+            pass
         return self.outline_manager.get_outline()
-
 
 def generate_outline_adversarial(user_need: dict) -> dict:
     """零模板 + 对抗式大纲生成（入口函数）

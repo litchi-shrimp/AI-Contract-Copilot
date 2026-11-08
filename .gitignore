@@ -48,3 +48,28 @@ build/
 # 其他临时文件
 *.tmp
 *.temp
+
+# 运行产物（会话工作区 / 检查点 / 评测缓存）
+Agent_generation/runs/
+Agent_generation/workspaces/
+
+Agent_generation/evals/artifacts/*/ws_*/
+
+Agent_generation/evals/_discarded/
+
+Agent_generation/.jwt_secret
+
+Agent_generation/workspaces_e2e/
+
+frontend/e2e/shots/
+
+Agent_generation/.secret_key
+
+
+# 不公开：交接/进度文档、评测中间产物（含私有模板内容）
+HANDOFF.md
+PROGRESS.md
+Agent_generation/evals/artifacts/
+Agent_generation/evals/cache/
+Agent_generation/evals/results/partial/
+

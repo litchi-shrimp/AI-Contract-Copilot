@@ -1,12 +1,14 @@
 {
     "api_key_name": "DeepSeekKey",
     "base_url": "https://api.deepseek.com",
-    "model_id": "deepseek-v4-flash",
-    "fallback_model_id": "deepseek-v4-flash",
+    "model_id": "deepseek-flash",
+    "fallback_model_id": "deepseek-flash",
     "temperature": 0.7,
-    "timeout": 200,
+    "timeout": 300,
     "max_retries": 3,
     "base_delay": 1,
     "stream": false,
-    "max_loop": 10
+    "max_loop": 10,
+    "idle_timeout": 90,
+    "fallback_after": 2
 }

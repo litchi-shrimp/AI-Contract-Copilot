@@ -39,16 +39,19 @@ class DeleteClauseTool:
             sorted_locators = sorted(
                 enumerate(locator),
                 key=lambda x: (
-                    -len(x[1].split('.')),
-                    tuple(-int(p) for p in x[1].split('.')),
+                    -len(str(x[1]).split('.')),
+                    tuple(-int(p) if p.isdigit() else 0 for p in str(x[1]).split('.')),
                     x[0]
                 )
             )
 
+            # 先解析节点对象，执行时按最新 locator 删除（删除会触发重编号）
+            refs = [(l, self.outline_manager.find_node(l)) for _, l in sorted_locators]
             results = []
-            for _, l in sorted_locators:
-                result = self._delete_clause(l)
-                results.append(result)
+            for l, ref in refs:
+                current_loc = ref.get("locator", l) if ref else l
+                result = self._delete_clause(current_loc)
+                results.append(result.replace(current_loc, l) if current_loc != l else result)
             return "\n".join(results)
 
         else:
@@ -74,42 +77,8 @@ class DeleteClauseTool:
         # 删除节点
         del parent[index]
         
-        # 更新后续节点的编号和locator
-        parts = list(map(int, locator.split('.')))
-        if node_type == 'section':
-            for i in range(index, len(parent)):
-                parent[i]['章节编号'] = f"第{i + 1}条"
-                parent[i]['locator'] = str(i + 1)
-                for j, clause in enumerate(parent[i]['条款列表']):
-                    clause['条款编号'] = f"{i + 1}.{j + 1}"
-                    clause['locator'] = f"{i + 1}.{j + 1}"
-                    for k, sub_clause in enumerate(clause.get('子条款列表', [])):
-                        sub_clause['子条款编号'] = f"{i + 1}.{j + 1}.{k + 1}"
-                        sub_clause['locator'] = f"{i + 1}.{j + 1}.{k + 1}"
-                        for l, sub_sub_clause in enumerate(sub_clause.get('子子条款列表', [])):
-                            sub_sub_clause['子子条款编号'] = f"{i + 1}.{j + 1}.{k + 1}.{l + 1}"
-                            sub_sub_clause['locator'] = f"{i + 1}.{j + 1}.{k + 1}.{l + 1}"
-        elif node_type == 'clause':
-            for i in range(index, len(parent)):
-                parent[i]['条款编号'] = f"{parts[0]}.{i + 1}"
-                parent[i]['locator'] = f"{parts[0]}.{i + 1}"
-                for j, sub_clause in enumerate(parent[i].get('子条款列表', [])):
-                    sub_clause['子条款编号'] = f"{parts[0]}.{i + 1}.{j + 1}"
-                    sub_clause['locator'] = f"{parts[0]}.{i + 1}.{j + 1}"
-                    for k, sub_sub_clause in enumerate(sub_clause.get('子子条款列表', [])):
-                        sub_sub_clause['子子条款编号'] = f"{parts[0]}.{i + 1}.{j + 1}.{k + 1}"
-                        sub_sub_clause['locator'] = f"{parts[0]}.{i + 1}.{j + 1}.{k + 1}"
-        elif node_type == 'sub_clause':
-            for i in range(index, len(parent)):
-                parent[i]['子条款编号'] = f"{parts[0]}.{parts[1]}.{i + 1}"
-                parent[i]['locator'] = f"{parts[0]}.{parts[1]}.{i + 1}"
-                for j, sub_sub_clause in enumerate(parent[i].get('子子条款列表', [])):
-                    sub_sub_clause['子子条款编号'] = f"{parts[0]}.{parts[1]}.{i + 1}.{j + 1}"
-                    sub_sub_clause['locator'] = f"{parts[0]}.{parts[1]}.{i + 1}.{j + 1}"
-        elif node_type == 'sub_sub_clause':
-            for i in range(index, len(parent)):
-                parent[i]['子子条款编号'] = f"{parts[0]}.{parts[1]}.{parts[2]}.{i + 1}"
-                parent[i]['locator'] = f"{parts[0]}.{parts[1]}.{parts[2]}.{i + 1}"
-        
+        # 统一重编号（兼容 chunk 全局 locator，避免按位置重算导致编号错乱）
+        self.outline_manager.renumber()
+
         self.outline_manager.log_operation('delete_clause', locator=locator, deleted_node=deleted_node)
         return f"成功删除 {locator} 条款"

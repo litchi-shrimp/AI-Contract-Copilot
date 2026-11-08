@@ -61,16 +61,10 @@ def get_leaf_categories(data, parent_key="", result=None):
     return result
 
 def get_all_classify():
-    # 读取 JSON 文件
-    template_library_path = BASE_DIR.parent / "template_library" / "all_classify.json"
-    with open(template_library_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    # 获取所有叶子节点
-    leaf_categories = get_leaf_categories(data)
-    # print(f"共找到 {len(leaf_categories)} 个最小级别分类：\n")
-    res_list = [item['path'] for item in leaf_categories]
-    return res_list
-
+    """全部叶子分类路径（数据源：TemplateRepository）"""
+    from ..repository import get_template_repository
+    data = get_template_repository().classify_tree()
+    return [item['path'] for item in get_leaf_categories(data)]
 # ====================== 【核心字段】======================
 REQUIRED_FIELDS = [
     "contract_type",
@@ -82,25 +76,13 @@ REQUIRED_FIELDS = [
 
 # ===================== 加载动态枚举 =====================
 def load_enum_from_template_library():
-    TEMPLATE_LIBRARY_DIR = BASE_DIR.parent / "template_library"
-    KEY_FIELDS = ["party_type", "region", "complexity", "scene"]
-    enum = {k: set() for k in KEY_FIELDS}
-
-    for fn in os.listdir(TEMPLATE_LIBRARY_DIR):
-        if not fn.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(TEMPLATE_LIBRARY_DIR, fn), "r", encoding="utf-8") as f:
-                group = json.load(f)
-            for tmp in group.values():
-                for k in KEY_FIELDS:
-                    v = tmp.get(k, "").strip()
-                    if v:
-                        enum[k].add(v)
-        except Exception as e:
-            print(f"[警告] 加载模板文件 {fn} 失败: {e}")
-    return {k: sorted(list(v)) for k, v in enum.items()}
-# -------------------------- Agent核心类（含模糊匹配+二次反问逻辑）--------------------------
+    """模板库中各元数据字段的取值（供 LLM 参考的枚举）"""
+    from ..repository import get_template_repository
+    try:
+        return get_template_repository().enum_values(("party_type", "region", "complexity", "scene"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[警告] 加载模板枚举失败: {e}")
+        return {k: [] for k in ("party_type", "region", "complexity", "scene")}# -------------------------- Agent核心类（含模糊匹配+二次反问逻辑）--------------------------
 class UserFieldExtractionAgent(BaseAgent):
     """用户需求提取Agent"""
     # 这里定义了 Agent 的流事件映射，用于处理不同类型的事件，便于后续实时解析JSON实现同时流式输出不同类型的内容
@@ -215,8 +197,12 @@ class UserFieldExtractionAgent(BaseAgent):
                 return False, "retry", error_msg
         
         # Step2：检查是否有额外需求，记录到self.extra_need
-        if data.get("new_extra_need")!="" and data.get("new_extra_need") not in self.extra_need:
-            self.extra_need.append(data.get("new_extra_need"))  # 记录额外需求
+        new_need = data.get("new_extra_need")
+        if isinstance(new_need, list):
+            new_need = "；".join(str(x) for x in new_need if x)
+        new_need = str(new_need or "").strip()
+        if new_need and new_need not in ("None", "无", "null") and new_need not in self.extra_need:
+            self.extra_need.append(new_need)  # 记录额外需求（过滤空值 / None，防止下游 join 失败）
         # Step3：修改当前字段
         if data.get("collected"):
             self.collected = data.get("collected")
@@ -275,6 +261,24 @@ class UserFieldExtractionAgent(BaseAgent):
             return ""
         return llm_response.strip()
 
+    @staticmethod
+    def original_request(need: dict) -> str:
+        """用户原话（所有 user 轮次拼接）：摘要由 LLM 改写，可能丢失具体数值，下游必须同时参考原话"""
+        turns = [str(h.get("content", "")) for h in (need or {}).get("history", []) or [] if h.get("role") == "user"]
+        return "\n".join(t for t in turns if t.strip())[:4000]
+
+    @staticmethod
+    def normalize_need(need: dict) -> dict:
+        """需求结构规范化（供流水线在 Step1 结束及恢复时调用）：extra_need 只保留非空字符串，collected 值转字符串"""
+        need = dict(need or {})
+        need["extra_need"] = [str(x).strip() for x in (need.get("extra_need") or [])
+                              if x is not None and str(x).strip() and str(x).strip() not in ("None", "null")]
+        need["collected"] = {k: ("" if v is None else str(v)) for k, v in (need.get("collected") or {}).items()}
+        need["summary"] = str(need.get("summary") or "")
+        if not need.get("original_request"):
+            need["original_request"] = UserFieldExtractionAgent.original_request(need)
+        return need
+
     def get_result(self):
         """返回当前智能体收集到的需求"""
         # 收集history, extra_need, collected
@@ -286,80 +290,111 @@ class UserFieldExtractionAgent(BaseAgent):
         }
         return result
 
-    def start_conversation(self):
-        """启动多轮对话，开始提取字段"""
-        # 如果是异步模式，在orchestrator中会显性将eventbus注入在这里的self.event_bus中，否则为None
-        eb = self.event_bus
+    OPENING = textwrap.dedent("""
+        您好，我将帮您收集合同相关信息。为了更精准地匹配合同方案，您可以把需求一次性告诉我：
+        1. 您的身份？
+        2. 需要什么类型的合同（比如：劳动合同，技术服务等）
+        3. 签约双方是个人还是企业（比如：个人-个人，个人-企业，企业-企业等）
+        4. 适用地区（比如：“通用”或者特定地区）
+        5. 合同复杂程度（比如：简单，标准，复杂等）
+        6. 使用场景（比如：居住，仲裁等）
+        7. 其他详细需求（比如：需要包含特殊合同条款，以及您个性化需求）
+        注：以上若有疑问，直接询问即可。
+    """).strip()
 
-        opening_remarks = textwrap.dedent("""
-                            🤖 您好，我将帮您收集合同相关信息，为了更精准地为您匹配合适的合同方案，您可以直接把需求一次性告诉我即可，我会马上为您整理～
-                                1. 您的身份？
-                                2. 需要什么类型的合同（比如：劳动合同，技术服务等）
-                                3. 签约双方是个人还是企业（比如：个人-个人，个人-企业，企业-企业等）
-                                4. 适用地区（比如：“通用”或者特定地区）
-                                5. 合同复杂程度（比如：简单，标准，复杂等）
-                                6. 使用场景（比如：居住，仲裁等）
-                                7. 其他详细需求（比如：需要包含特殊合同条款，以及您个性化需求）
-                                注：以上若有疑问，直接询问即可。
-                            """).strip()
-        self.history_manager.add_agent_response(opening_remarks)
-        if eb:
-            eb.put_sync("agent.ask", agent=self.agent_name, data={"question": opening_remarks, "expects_input": True})
-        else:
-            print(f"{opening_remarks}")
+    CONFIRM_WORDS = ('退出', 'quit', 'exit', '没问题', '确认')
 
-        for loop in range(self.config.max_loop):
-            # 如果是异步模式，在orchestrator中会显性将eventbus注入在self.event_bus中，否则为None
-            if eb: user_input = str(eb.wait_for_user_input_sync(timeout=1800) or "").strip()
-            else: user_input = str(input("👤 用户：")).strip()
+    # ------------------------------------------------------------ 可序列化状态（检查点）
+    def export_state(self) -> dict:
+        return {"collected": self.collected, "missing": self.missing, "extra_need": self.extra_need,
+                "history": self.history_manager.get_history(), "turns": getattr(self, "turns", 0)}
 
-            if not user_input:
-                if eb: eb.put_sync("system", agent=self.agent_name, data={"message": "⚠️ 请输入有效内容，不要为空哦～"})
-                else: print("⚠️ 请输入有效内容，不要为空哦～")
-                continue
-            
-            if user_input.lower() in ['退出', 'quit', 'exit', '没问题', '确认']: break  # 先简要命中
-            self.history_manager.add_user_input(user_input)
-            system_prompt = self._generate_system_prompt()
-            user_prompt = str("【生成要求】\n"+self._generate_user_prompt()+"\n【历史对话】\n"+str(self.history_manager.get_history()[:-1])+"\n【当前用户回答】\n"+str(self.history_manager.get_history()[-1]))
+    def load_state(self, state: dict):
+        if not state:
+            return
+        self.collected = state.get("collected", {}) or {}
+        self.missing = state.get("missing", REQUIRED_FIELDS.copy())
+        self.extra_need = state.get("extra_need", []) or []
+        self.history_manager.history = list(state.get("history", []) or [])
+        self.turns = int(state.get("turns", 0) or 0)
 
-            # 内部重试循环：校验失败（主要校验contract_type是否确实在可选合同类型列表中）时自动重试LLM，用户无感知
-            is_complete, status, real_response = False, None, ""
-            llm_response = ""
-            for inner in range(2):# 最多重试1次，如果contract_type还不在可选列表里，就直接退出这一阶段，后续随缘生成。
-                llm_response = self.llm_call(system_prompt, user_prompt)
-                if not llm_response:
-                    break
-                is_complete, status, real_response = self._parse_llm_response(llm_response, user_input)
-                if status != "retry":
-                    break
-                # 校验失败：错误信息塞给LLM，不经过用户等待
-                self.history_manager.add_agent_response(real_response)
+    def opening(self) -> str:
+        if not self.history_manager.get_history():
+            self.history_manager.add_agent_response(self.OPENING)
+        return self.OPENING
 
-            if status == "retry":
-                # 重试耗尽，直接退出这一阶段，大不了后续匹配不到模板直接用对抗生成大纲，不影响整体流程。
-                is_complete = True
-                status = "complete"
+    def turn(self, user_input: str):
+        """处理一轮用户输入 → (是否收集完成, 回复文本)
 
-            if not llm_response:
-                if eb: eb.put_sync("system", agent=self.agent_name, data={"message": "⚠️ 系统繁忙，请重试"})
-                else: print("⚠️ 系统繁忙，请重试")
-                continue
+        幂等性：本函数只修改内存状态，调用方在成功返回后再持久化检查点；
+        中途取消/失败时调用方丢弃本轮状态，从上一个检查点恢复即可重放。
+        """
+        self.turns = getattr(self, "turns", 0) + 1
+        user_input = str(user_input or "").strip()
+        if not user_input:
+            return False, "请输入有效内容～"
+        if user_input.lower() in self.CONFIRM_WORDS and not self.missing:
+            return True, ""
+        self.history_manager.add_user_input(user_input)
+        if self.turns > self.config.max_loop:
+            # 轮数上限：不再追问，用已收集信息继续（缺失字段在后续步骤以通用方式处理）
+            return True, "信息已基本收集，我将基于现有信息为您生成合同。"
+        system_prompt = self._generate_system_prompt()
+        user_prompt = ("【生成要求】\n" + self._generate_user_prompt() + "\n【历史对话】\n"
+                       + str(self.history_manager.get_history()[:-1]) + "\n【当前用户回答】\n"
+                       + str(self.history_manager.get_history()[-1]))
+        is_complete, status, real_response = False, None, ""
+        for _ in range(2):
+            llm_response = self.llm_call(system_prompt, user_prompt)
+            is_complete, status, real_response = self._parse_llm_response(llm_response, user_input)
+            if status != "retry":
+                break
+            user_prompt += "\n【校验反馈】\n" + real_response
+        if status == "retry":
+            # contract_type 校验仍失败：标记为 ELSE，后续走零模板对抗生成（降级，不阻塞用户）
+            self.collected["contract_type"] = "ELSE"
+            if "contract_type" in self.missing:
+                self.missing.remove("contract_type")
+            real_response = real_response.split("\n")[0]
+            return (len(self.missing) == 0), "暂未在模板库中找到完全对应的合同类型，我会根据您的描述定制生成。"
+        if is_complete and status == "complete":
+            self.history_manager.add_agent_response(real_response or "")
+            return True, real_response or ""
+        self.history_manager.add_agent_response(real_response)
+        return False, real_response
 
-            if is_complete and status=="complete": break
-            else:
-                if eb:
-                    eb.put_sync("agent.ask", agent=self.agent_name, data={"question": real_response, "expects_input": True})
-                else:
-                    print(f"🤖 Agent：{real_response}")
-            self.history_manager.add_agent_response(real_response)
-
-        # 最后跳出后，根据用户对话历史生成摘要
-        self.summary = self._generate_summary()
-        self.history_manager.add_agent_response("【用户需求摘要】\n"+self.summary)
-        self.history_manager.save_history(AGENT_DIR / "memory" / (f"{self.agent_name}.json"))
+    def finalize(self) -> dict:
+        """收集结束：生成需求摘要（失败时降级为拼接字段，保证下游可用）"""
+        try:
+            self.summary = self._generate_summary()
+        except Exception as e:  # noqa: BLE001
+            if type(e).__name__ == "RunCancelled":
+                raise
+            self.summary = ""
+        if not self.summary:
+            c = self.collected or {}
+            self.summary = (f"用户需要一份{c.get('contract_type', '合同')}，签约主体为{c.get('party_type', '未指定')}，"
+                            f"适用地区{c.get('region', '通用')}，复杂度{c.get('complexity', '标准')}，"
+                            f"使用场景为{c.get('scene', '通用')}。额外需求：{'；'.join(self.extra_need) or '无'}。")
+        for k in REQUIRED_FIELDS:
+            v = self.collected.get(k)
+            if not v or v == "None":
+                self.collected[k] = {"region": "通用", "complexity": "标准"}.get(k, "未指定")
+        self.history_manager.add_agent_response("【用户需求摘要】\n" + self.summary)
+        from ..runtime import paths
+        self.history_manager.save_history(paths.memory_dir() / f"{self.agent_name}.json")
         return self.get_result()
 
+    def start_conversation(self):
+        """CLI 交互模式（命令行 input()）"""
+        print(self.opening())
+        while True:
+            user_input = str(input("👤 用户：")).strip()
+            done, reply = self.turn(user_input)
+            if done:
+                break
+            print(f"🤖 Agent：{reply}")
+        return self.finalize()
 # -------------------------- 启动Agent --------------------------
 if __name__ == "__main__":
     try:

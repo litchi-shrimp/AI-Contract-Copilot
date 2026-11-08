@@ -18,6 +18,7 @@ import time
 MODIFY_TOOLS = ['update_clause', 'insert_clause', 'delete_clause']
 
 from ..core.base_agent import AGENTS_DIR, AGENT_DIR, BASE_DIR
+from ..runtime import paths as _paths
 
 class OutlineModificationAgent(BaseAgent):
     """大纲修改Agent，负责管理和修改合同大纲"""
@@ -40,8 +41,8 @@ class OutlineModificationAgent(BaseAgent):
         """
         super().__init__(agent_name, BASE_DIR / "configs" / "config_outline_modification.json")
         
-        self.outline_path = AGENT_DIR / "data" / outline_name if outline_name else None
-        self.match_result_path = AGENT_DIR / "data" / "match_result.json"
+        self.outline_path = _paths.data_dir() / outline_name if outline_name else None
+        self.match_result_path = _paths.data_dir() / "match_result.json"
 
         self.skill_list_path = AGENTS_DIR / "outline_modification_agent_skills.json"
         if not match_data:
@@ -50,7 +51,7 @@ class OutlineModificationAgent(BaseAgent):
         self.skills = json.load(open(self.skill_list_path, "r", encoding="utf-8"))
         # 内存模式优先
         if data is not None:
-            save_path = self.outline_path or (AGENT_DIR / "data" / f"{agent_name}_outline.json")
+            save_path = self.outline_path or (_paths.data_dir() / f"{agent_name}_outline.json")
             self.outline_manager = OutlineManager(data=data, match_data=match_data, outline_path=save_path)
         else:
             self.outline_manager = OutlineManager(outline_path = self.outline_path, match_result_path = self.match_result_path)
@@ -96,6 +97,7 @@ class OutlineModificationAgent(BaseAgent):
         self._cancelled = False
 
         for loop in range(self.config.max_loop):
+            self.check_cancelled()
             # 超时检查：主线程已放弃等待
             if self._cancelled:
                 answer_text = "执行超时"
@@ -115,11 +117,17 @@ class OutlineModificationAgent(BaseAgent):
             # 清空合同信息类型的记忆
             self.history_manager.del_typeall_history("contract")
             
-            # 2. 解析失败 → 重试
-            if "error" in parsed:
-                self.history_manager.add_agent_response(response)
+            # 2. 解析失败 → 带错误重试；连续 3 次失败熔断，向用户返回友好提示
+            if "error" in parsed and len(parsed) == 1:
+                self._parse_errors = getattr(self, "_parse_errors", 0) + 1
+                if self._parse_errors >= 3:
+                    self._parse_errors = 0
+                    answer_text = "抱歉，我刚才没能正确处理您的请求，请换一种说法再试一次。"
+                    break
+                self.history_manager.add_agent_response(response[:1500])
                 self.history_manager.add_user_input("输出格式错误，请返回合法JSON")
                 continue
+            self._parse_errors = 0
 
             # 3. 记录思考和行动到stderr
             think = parsed.get("think", "")
@@ -203,7 +211,7 @@ class OutlineModificationAgent(BaseAgent):
                     file=sys.stderr)
 
                 # 执行工具
-                result = self.tool_manager.execute_tool(tool_name, tool_params)
+                result = self.tool_manager.run(tool_name, tool_params, agent_name=self.agent_name)
                 print(f"【工具执行结果】{result}", file=sys.stderr)
 
                 # 记录到历史
@@ -362,8 +370,8 @@ class OutlineModificationAgent(BaseAgent):
         outline_data = self.outline_manager.get_outline()
         if user_confirmed:
             modified_contract_text = self.outline_manager._format_outline()
-            with open(AGENT_DIR / "data" / "initial_contract_text.txt", "w", encoding="utf-8") as f:
+            with open(_paths.data_dir() / "initial_contract_text.txt", "w", encoding="utf-8") as f:
                 f.write(modified_contract_text)
         # 保存一下当前Agent的所有memory（暂时用不到）
-        self.history_manager.save_history(AGENT_DIR / "memory" / (f"{self.agent_name}.json"))
+        self.history_manager.save_history(_paths.memory_dir() / f"{self.agent_name}.json")
         return (user_confirmed, outline_data)
