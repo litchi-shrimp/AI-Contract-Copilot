@@ -3,6 +3,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import { diff, stats, tpl } from '../lib/contract.js'
+import { clauseBlocks, footerBlocks, headerBlocks } from '../lib/layout.js'
+import LayoutBlocks from './LayoutBlocks.vue'
 
 const props = defineProps({
   doc: { type: Object, default: null },      // 当前合同/大纲
@@ -25,12 +27,12 @@ const ops = computed(() => {
   return diff(props.prev, props.doc)
 })
 const st = computed(() => stats(ops.value))
-const header = computed(() => {
-  const t = tpl(props.doc)
-  const lines = String(t?.['合同首部'] || '').split('\n').map((x) => x.trim()).filter(Boolean)
-  const title = lines[0] && lines[0].length <= 40 ? lines[0] : props.title || '合同'
-  return { title, rest: lines[0] && lines[0].length <= 40 ? lines.slice(1) : lines }
-})
+const header = computed(() => headerBlocks(tpl(props.doc)?.['合同首部'], props.title || '合同'))
+const docTitle = computed(() => header.value[0]?.text || props.title || '合同')
+const headerBody = computed(() => header.value.slice(1))
+// 条款内文本按需解析（表格 / 公式）；纯文本条款走快速路径，不额外分配
+const RICH = /\||[=＝]/
+const blocksOf = (text) => (RICH.test(text || '') ? clauseBlocks(text) : null)
 const outlineTree = computed(() => ops.value.filter((o) => o.kind === 'section' || o.level === 2))
 
 // 修改发生时自动滚动到第一处变更
@@ -81,22 +83,32 @@ function jump(key) {
       </div>
       <template v-else-if="view === 'doc'">
         <article class="page" :class="{ outline: kind === 'outline' }">
-          <h1 class="doc-title">{{ header.title }}</h1>
+          <h1 class="doc-title">{{ docTitle }}</h1>
           <template v-for="(o, i) in ops" :key="o.key + ':' + o.status + ':' + i">
-            <div v-if="o.kind === 'header'" class="hf" :class="['st-' + o.status, { chg: o.status !== 'same' }]">
-              <p v-for="(ln, j) in header.rest" :key="j">{{ ln }}</p>
+            <div v-if="o.kind === 'header'" class="hf head" :class="['st-' + o.status, { chg: o.status !== 'same' }]">
+              <LayoutBlocks :blocks="headerBody" />
             </div>
             <h2 v-else-if="o.kind === 'section'" class="sec" :data-key="o.key" :class="['st-' + o.status, { chg: o.status !== 'same' }]">
               <span class="num">{{ o.num }}</span>{{ o.text }}
               <del v-if="o.status === 'modified'" class="old">{{ o.oldText }}</del>
             </h2>
-            <p v-else-if="o.kind === 'clause'" class="cl" :data-key="o.key" :class="['lv' + o.level, 'st-' + o.status, { chg: o.status !== 'same' }]">
-              <span class="num">{{ o.num }}</span>
-              <span class="txt">{{ o.text }}</span>
+            <div v-else-if="o.kind === 'clause'" class="cl" :data-key="o.key" :class="['lv' + o.level, 'st-' + o.status, { chg: o.status !== 'same' }]">
+              <template v-if="blocksOf(o.text)">
+                <template v-for="(b, j) in blocksOf(o.text)" :key="j">
+                  <p v-if="b.t === 'para'" class="ln"><span v-if="j === 0" class="num">{{ o.num }}</span>{{ b.text }}</p>
+                  <p v-else-if="b.t === 'formula'" class="ln formula"><span v-if="j === 0" class="num">{{ o.num }}</span><span class="fx">{{ b.text }}</span></p>
+                  <template v-else-if="b.t === 'table'">
+                    <p v-if="j === 0" class="ln"><span class="num">{{ o.num }}</span></p>
+                    <table class="tbl"><thead><tr><th v-for="(h, k) in b.head" :key="k">{{ h }}</th></tr></thead>
+                      <tbody><tr v-for="(r, k) in b.rows" :key="k"><td v-for="(c, m) in r" :key="m">{{ c }}</td></tr></tbody></table>
+                  </template>
+                </template>
+              </template>
+              <p v-else class="ln"><span class="num">{{ o.num }}</span><span class="txt">{{ o.text }}</span></p>
               <del v-if="o.status === 'modified'" class="old">{{ o.oldText }}</del>
-            </p>
+            </div>
             <div v-else-if="o.kind === 'footer'" class="hf foot" :class="['st-' + o.status, { chg: o.status !== 'same' }]">
-              <p v-for="(ln, j) in o.text.split('\n').filter(Boolean)" :key="j">{{ ln }}</p>
+              <LayoutBlocks :blocks="footerBlocks(o.text)" />
             </div>
           </template>
         </article>
@@ -132,20 +144,29 @@ function jump(key) {
 /* A4 纸张 */
 .page { background: #fff; max-width: 794px; margin: 0 auto; padding: 72px 76px 96px; box-shadow: 0 2px 10px rgba(15, 23, 42, .08);
   font-family: var(--doc-font); color: #111; font-size: 15px; line-height: 1.9; user-select: text; }
-.doc-title { text-align: center; font-size: 22px; font-weight: 700; margin: 0 0 22px; letter-spacing: .04em; font-family: var(--doc-font); }
-.hf p { margin: 0; }
-.hf.foot { margin-top: 28px; }
-.sec { font-size: 16px; font-weight: 700; margin: 22px 0 8px; font-family: var(--doc-font); }
-.sec .num { margin-right: 8px; }
-.cl { margin: 4px 0; text-align: justify; }
-.cl .num { margin-right: 6px; color: #333; font-variant-numeric: tabular-nums; }
-.cl.lv2 { text-indent: 2em; }
+.doc-title { text-align: center; font-size: 22px; font-weight: 700; margin: 0 0 26px; letter-spacing: .12em; font-family: var(--doc-font); }
+.hf.head { margin-bottom: 18px; }
+.hf.foot { margin-top: 36px; }
+.sec { font-size: 16px; font-weight: 700; margin: 26px 0 10px; text-align: center; letter-spacing: .04em; font-family: var(--doc-font); }
+.sec .num { margin-right: .6em; }
+.cl { margin: 2px 0; }
+.cl .ln { margin: 0; text-align: justify; }
+.cl .num { margin-right: .4em; color: #222; font-variant-numeric: tabular-nums; }
+.cl.lv2 .ln:first-child { text-indent: 2em; }
+.cl.lv2 .ln + .ln { text-indent: 2em; }
 .cl.lv3 { padding-left: 2em; }
 .cl.lv4 { padding-left: 4em; }
-.page.outline .cl.lv2 { text-indent: 0; padding-left: 1em; }
+.cl.lv2 .formula, .cl.lv3 .formula { text-indent: 0; padding-left: 2em; }
+.cl .formula .fx { display: inline-block; text-indent: 0; padding: 1px 8px; margin: 2px 0; background: #f6f7f9; border-radius: 4px;
+  font-family: "Cambria Math", "Times New Roman", var(--doc-font); letter-spacing: .02em; }
+.tbl { width: 100%; border-collapse: collapse; margin: 8px 0 10px; font-size: 14px; line-height: 1.6; text-indent: 0; }
+.tbl th, .tbl td { border: 1px solid #333; padding: 5px 8px; text-align: left; vertical-align: top; }
+.tbl th { background: #f5f5f5; font-weight: 700; text-align: center; }
+.page.outline .sec { text-align: left; border-bottom: 1px solid #eee; padding-bottom: 4px; letter-spacing: 0; }
+.page.outline .cl.lv2 .ln { text-indent: 0; }
+.page.outline .cl.lv2 { padding-left: 1em; }
 .page.outline .cl.lv3 { padding-left: 3em; color: #333; }
 .page.outline .cl.lv4 { padding-left: 5em; color: #444; }
-.page.outline .sec { border-bottom: 1px solid #eee; padding-bottom: 4px; }
 .st-added { background: var(--add-bg); box-shadow: inset 3px 0 0 #34c759; border-radius: 3px; }
 .st-removed { background: var(--del-bg); color: var(--del-ink); text-decoration: line-through; border-radius: 3px; box-shadow: inset 3px 0 0 var(--err); }
 .st-modified { background: var(--mod-bg); box-shadow: inset 3px 0 0 #f5a623; border-radius: 3px; }
